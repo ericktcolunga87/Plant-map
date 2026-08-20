@@ -11,7 +11,7 @@ leaves the page.
 |---|---|
 | `index.html` | The entire app |
 | `map.enc` | Your map (printed machine numbers erased — the app draws them live), AES-256 encrypted |
-| `assets.enc` | Encrypted asset list (starts with 25 machine numbers auto-read off the map) |
+| `assets.enc` | Encrypted asset list (143 machine numbers auto-read off the map) |
 | `encrypt.html` | Tool to (re-)encrypt a map / change the password (contains no secrets) |
 | `sw.js`, `manifest.json`, `icon-192.png`, `icon-512.png` | Offline cache + home-screen install |
 | `README.md` | This file |
@@ -48,7 +48,7 @@ numbers erased). Keep it on your computer; you'll need it if you ever change the
 Go to **two doorways (or step just outside) at opposite ends of the building** — GPS is strongest
 there and outdoor points position you correctly indoors. At each: Menu → Add calibration point →
 tap your exact spot on the map → hold still ~30 s → Save. A 3rd point makes the app cross-check
-itself and show a fit error in meters; if one point shows a big "off by" value, delete and redo it.
+itself and show a fit error in feet; if one point shows a big "off by" value, delete and redo it.
 Calibration is per-phone and survives closing the app.
 
 ## Assets
@@ -57,14 +57,14 @@ Calibration is per-phone and survives closing the app.
   were erased from the image) — so **Add places a number on the map, Move moves it, Delete
   removes it**. A menu checkbox hides them all if you want a clean map.
 - **Find** (bottom bar): type a number → tap the match → the map jumps there with a blinking pink
-  marker. While tracking, a dashed line and live distance connect you to it. The Find and manage
+  marker. While tracking, a dashed line and live distance (in feet) connect you to it. The Find and manage
   lists stay empty until you type, so hundreds of assets never make them long.
 - **Menu → Add / tag assets**: type a number, tap its spot, and it immediately asks for the next
   number — you can tag dozens in one walk. Typing an existing number offers to move it.
 - Tags save on the phone instantly. To share them (or back them up): Menu → **Export assets file**,
   then upload that `assets.enc` to the repo. Other phones pick it up via Menu → **Reload assets
   from the website file** (or automatically on a fresh install).
-- The 25 pre-loaded numbers were read off the map automatically — spot-check them; Move/Delete
+- The pre-loaded numbers were read off the map automatically — spot-check them; Move/Delete
   fixes any that landed off.
 - When you make a better map later: re-encrypt it as `map.enc`. If it's the same layout at a
   different resolution, asset spots scale over automatically; if the layout itself changed,
@@ -80,6 +80,14 @@ noticeably better: the accelerometer locks the dot when the phone is physically 
 faster when you start walking. The translucent circle is still the GPS's own honest uncertainty —
 believe the circle.
 
+## Updates not showing up?
+
+Files are cached for offline use, so updates normally land on the *second* open after an upload
+(first open downloads, second one runs). If a phone still shows old data: **Menu → Force fresh
+update** wipes the app/site cache and re-downloads everything — tags, calibration, and the
+remembered password are kept. "Reload assets from the website file" also now bypasses every
+cache layer.
+
 ## If location is blocked (especially iPhone)
 
 Tap the GPS status in the top-left for the built-in checklist. Short version: Settings → Privacy &
@@ -88,7 +96,7 @@ aA → Website Settings → Location → Allow. Test in plain Safari before usin
 
 ## Known limits
 
-- Indoors under a steel roof, GPS may be ±15–50 m or absent; the accuracy circle tells the truth.
+- Indoors under a steel roof, GPS may be ±50–160 ft or absent; the accuracy circle tells the truth.
   Browsers cannot scan Wi-Fi or Bluetooth beacons — real indoor positioning would need a native
   app plus beacon hardware.
 - The screen must stay on while tracking (the app holds a wake lock); phones don't give web pages

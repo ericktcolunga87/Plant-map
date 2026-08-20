@@ -1,4 +1,4 @@
-var CACHE = "plantloc-v3";
+var CACHE = "plantloc-v4";
 var ASSETS = ["./", "index.html", "map.enc", "assets.enc", "manifest.json",
               "icon-192.png", "icon-512.png", "encrypt.html"];
 
@@ -20,28 +20,35 @@ self.addEventListener("activate", function (e) {
   );
 });
 
-// stale-while-revalidate: answer from cache instantly, refresh the cache in the
-// background so re-uploaded files (index.html, assets.enc, map.enc) arrive on
-// the next launch. fetch(..., {cache:"reload"}) from the page skips the cache.
+// Strategy:
+//  - "?fresh=..." URLs (and reload/no-store requests) go straight to the network,
+//    bypassing the HTTP cache, and the result is stored under the clean URL.
+//  - Everything else: serve from cache instantly, revalidate with the server in the
+//    background (cache:"no-cache" forces an ETag check past GitHub Pages' 10-min cache),
+//    so the next launch always has the latest files.
 self.addEventListener("fetch", function (e) {
   if (e.request.method !== "GET") return;
-  if (new URL(e.request.url).origin !== location.origin) return;
-  if (e.request.cache === "reload" || e.request.cache === "no-store") {
+  var u = new URL(e.request.url);
+  if (u.origin !== location.origin) return;
+
+  if (u.searchParams.has("fresh") || e.request.cache === "reload" || e.request.cache === "no-store") {
     e.respondWith(
-      fetch(e.request).then(function (r) {
+      fetch(e.request, { cache: "no-store" }).then(function (r) {
         if (r && r.ok) {
+          var clean = new URL(u.href); clean.search = "";
           var copy = r.clone();
-          caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+          caches.open(CACHE).then(function (c) { c.put(clean.href, copy); });
         }
         return r;
       })
     );
     return;
   }
+
   e.respondWith(
     caches.open(CACHE).then(function (c) {
       return c.match(e.request, { ignoreSearch: true }).then(function (hit) {
-        var net = fetch(e.request).then(function (r) {
+        var net = fetch(e.request, { cache: "no-cache" }).then(function (r) {
           if (r && r.ok) c.put(e.request, r.clone());
           return r;
         }).catch(function () { return hit; });

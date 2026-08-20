@@ -23,8 +23,8 @@
     font-family:var(--sans);position:fixed;width:100%;overscroll-behavior:none;}
   #viewport{position:absolute;inset:0;touch-action:none;overflow:hidden;
     -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
-  #world{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;}
-  #mapimg{display:block;pointer-events:none;}
+  #mapCanvas{position:absolute;inset:0;}
+  #world{position:absolute;left:0;top:0;transform-origin:0 0;}
   #overlay{position:absolute;left:0;top:0;pointer-events:none;}
 
   #topbar{position:fixed;left:0;right:0;top:0;z-index:20;
@@ -141,8 +141,8 @@
 <body>
 
 <div id="viewport">
+  <canvas id="mapCanvas"></canvas>
   <div id="world">
-    <img id="mapimg" alt="Plant map">
     <svg id="overlay" xmlns="http://www.w3.org/2000/svg">
       <g id="assetsG" class="hidden"></g>
       <line id="navLine" class="hidden" stroke="#ff2d78" stroke-width="2" stroke-dasharray="7 7"
@@ -249,6 +249,7 @@
   <h3>Map &amp; security</h3>
   <div class="btncol">
     <button id="btnPickMap">Replace map image (stays on this phone)</button>
+    <button id="btnFresh">Force fresh update (re-download app &amp; map)</button>
     <button id="btnLock" class="danger">Lock &mdash; forget password on this phone</button>
     <button id="btnCloseSheet">Close</button>
   </div>
@@ -338,6 +339,7 @@ var S = {
   gpsMsg:null
 };
 var $ = function(id){ return document.getElementById(id); };
+var FT = 3.28084;
 var LS_CAL = "plantloc.calib.v1";
 var LS_SET = "plantloc.settings.v2";
 
@@ -414,8 +416,9 @@ function plEncryptFile(key, salt, bytes){
 /* ================= unlock flow ================= */
 var mapEncBuf = null;
 function fetchEnc(name, bust){
-  var opts = bust ? {cache:"reload"} : {};
-  return fetch(name, opts).then(function(r){
+  var url = bust ? (name + "?fresh=" + Date.now()) : name;
+  var opts = bust ? {cache:"no-store"} : {};
+  return fetch(url, opts).then(function(r){
     if (!r.ok) throw new Error(name + " notfound");
     return r.arrayBuffer();
   });
@@ -461,7 +464,7 @@ $("btnUnlock").addEventListener("click", unlockWithPassword);
 $("pwIn").addEventListener("keydown", function(e){ if (e.key === "Enter") unlockWithPassword(); });
 
 /* ================= map loading ================= */
-var img = $("mapimg"), ovl = $("overlay");
+var img = new Image(), ovl = $("overlay");
 function useBlob(blob){
   img.onload = function(){
     S.iw = img.naturalWidth; S.ih = img.naturalHeight; S.mapReady = true;
@@ -612,7 +615,7 @@ function updateTargetDist(){
   if (S.T && S.pos){
     var p = geoToPixel(S.pos.lat, S.pos.lon);
     var m = Math.hypot(S.target.px-p.x, S.target.py-p.y) / S.T.s;
-    el.textContent = m >= 1000 ? (m/1000).toFixed(2)+" km" : Math.round(m)+" m";
+    el.textContent = Math.round(m*FT) + " ft";
   } else el.textContent = "\u2014";
 }
 
@@ -740,6 +743,15 @@ $("mgmtIn").addEventListener("input", refreshMgmt);
 
 /* ================= view / rendering ================= */
 var world = $("world"), vp = $("viewport");
+var canvas = $("mapCanvas"), ctx = canvas.getContext("2d"), dpr = 1;
+function sizeCanvas(){
+  dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(vp.clientWidth * dpr);
+  canvas.height = Math.round(vp.clientHeight * dpr);
+  canvas.style.width = vp.clientWidth + "px";
+  canvas.style.height = vp.clientHeight + "px";
+}
+sizeCanvas();
 function fitView(){
   var vw = vp.clientWidth, vh = vp.clientHeight;
   var s = Math.min(vw/S.iw, vh/S.ih) * 0.98;
@@ -757,6 +769,13 @@ function unregisterCS(el){
   if (i >= 0) csNodes.splice(i,1);
 }
 function render(){
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#0d1015";
+  ctx.fillRect(0, 0, vp.clientWidth, vp.clientHeight);
+  if (S.mapReady){
+    ctx.setTransform(S.view.scale*dpr, 0, 0, S.view.scale*dpr, S.view.x*dpr, S.view.y*dpr);
+    ctx.drawImage(img, 0, 0);
+  }
   world.style.transform = "translate(" + S.view.x + "px," + S.view.y + "px) scale(" + S.view.scale + ")";
   var inv = 1/S.view.scale, i;
   for (i=0;i<csNodes.length;i++){
@@ -814,7 +833,7 @@ vp.addEventListener("pointermove", function(e){
     if (tapStart && Math.hypot(e.clientX-tapStart.x, e.clientY-tapStart.y) > 9) tapStart.moved = true;
     if (dx || dy) setFollow(false);
     ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    render();
+    scheduleRender();
   } else if (ptrs.size === 2){
     var other = null;
     ptrs.forEach(function(v,k){ if (k !== e.pointerId) other = v; });
@@ -833,7 +852,7 @@ vp.addEventListener("pointermove", function(e){
     }
     setFollow(false);
     ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
-    render();
+    scheduleRender();
   }
 });
 function ptrEnd(e){
@@ -853,7 +872,7 @@ vp.addEventListener("wheel", function(e){
   S.view.x = mx - f*(mx - S.view.x);
   S.view.y = my - f*(my - S.view.y);
   S.view.scale = ns;
-  render();
+  scheduleRender();
 }, {passive:false});
 
 function handleTap(sx, sy){
@@ -1001,16 +1020,16 @@ function updateFitUI(msgOverride){
   else if (n === 0) line = "No points yet.";
   else if (n === 1) line = "1 point. Add at least 1 more, far from the first.";
   else if (n === 2) line = "2 points \u2014 tracking works. Add a 3rd to cross-check accuracy.";
-  else if (S.T && S.T.rmsM != null) line = n + " points \u00b7 self-check error \u00b1" + S.T.rmsM.toFixed(1) + " m" +
+  else if (S.T && S.T.rmsM != null) line = n + " points \u00b7 self-check error \u00b1" + Math.round(S.T.rmsM*FT) + " ft" +
        (S.T.rmsM > 8 ? " \u2014 one point may be bad, check below." : "");
   else line = n + " points \u2014 spread them farther apart.";
   $("fitLine").textContent = line;
   var list = $("ptList"); list.innerHTML = "";
   S.calib.forEach(function(pt, i){
     var row = document.createElement("div"); row.className = "ptrow";
-    var res = (S.T && S.T.res && S.T.res[i] != null) ? " \u00b7 off " + S.T.res[i].toFixed(1) + " m" : "";
+    var res = (S.T && S.T.res && S.T.res[i] != null) ? " \u00b7 off " + Math.round(S.T.res[i]*FT) + " ft" : "";
     row.innerHTML = '<div>Point ' + (i+1) +
-      ' <div class="meta">GPS \u00b1' + pt.acc.toFixed(0) + ' m' + res + '</div></div>';
+      ' <div class="meta">GPS \u00b1' + Math.round(pt.acc*FT) + ' ft' + res + '</div></div>';
     var del = document.createElement("button");
     del.className = "small danger"; del.textContent = "Delete";
     del.addEventListener("click", function(){
@@ -1055,7 +1074,7 @@ function startCapture(){
     var best = Infinity;
     S.cap.samples.forEach(function(x){ if (x.acc < best) best = x.acc; });
     $("capStats").textContent = S.cap.samples.length + " fixes";
-    $("capAcc").textContent = "best accuracy \u00b1" + best.toFixed(0) + " m \u2014 more fixes = steadier point";
+    $("capAcc").textContent = "best accuracy \u00b1" + Math.round(best*FT) + " ft \u2014 more fixes = steadier point";
     $("capWarn").classList.toggle("hidden", best <= 25);
     $("btnCapSave").disabled = S.cap.samples.length < 5;
   }, function(err){
@@ -1231,13 +1250,13 @@ function updateTopbar(){
   if (S.tracking && S.pos && !S.gpsMsg){
     var age = Math.round((Date.now()-S.posT)/1000);
     var el = $("gpsStat");
-    el.textContent = "\u00b1" + S.pos.acc.toFixed(0) + " m \u00b7 " + age + "s" +
+    el.textContent = "\u00b1" + Math.round(S.pos.acc*FT) + " ft \u00b7 " + age + "s" +
       (FLT.mode === "still" ? " \u00b7 avg" : "");
     el.className = S.pos.acc < 10 ? "good" : (S.pos.acc < 25 ? "warn" : "bad");
   }
   var n = S.calib.length, f = $("fitStat");
   if (n < 2) f.textContent = "Needs " + (2-n) + " more cal point" + (n===1?"":"s");
-  else if (S.T && S.T.rmsM != null) f.textContent = n + " pts \u00b7 \u00b1" + S.T.rmsM.toFixed(1) + " m fit";
+  else if (S.T && S.T.rmsM != null) f.textContent = n + " pts \u00b7 \u00b1" + Math.round(S.T.rmsM*FT) + " ft fit";
   else f.textContent = n + " pts";
 }
 setInterval(function(){ updateTopbar(); updateTargetDist(); }, 1000);
@@ -1334,6 +1353,23 @@ $("btnIntroStart").addEventListener("click", function(){
   showHint("Go to your first doorway (or step just outside). Stand still on a spot you can point to on the map, then tap that exact spot. Zoom in first.",
     [{label:"Cancel", fn:cancelPlacing}]);
 });
+$("btnFresh").addEventListener("click", function(){
+  if (!confirm("Re-download the app, map, and asset file from the website? Your tags, calibration, and remembered password stay.")) return;
+  var work = [];
+  if ("serviceWorker" in navigator && navigator.serviceWorker.getRegistrations){
+    work.push(navigator.serviceWorker.getRegistrations().then(function(rs){
+      return Promise.all(rs.map(function(r){ return r.unregister(); }));
+    }).catch(function(){}));
+  }
+  if (window.caches && caches.keys){
+    work.push(caches.keys().then(function(ks){
+      return Promise.all(ks.map(function(k){ return caches.delete(k); }));
+    }).catch(function(){}));
+  }
+  Promise.all(work).then(function(){
+    location.replace(location.pathname + "?fresh=" + Date.now());
+  });
+});
 $("btnLock").addEventListener("click", function(){
   if (!confirm("Forget the password on this phone? You'll have to type it again next time.")) return;
   idbDel("cred").then(function(){ location.reload(); }, function(){ location.reload(); });
@@ -1344,7 +1380,7 @@ loadCalib();
 loadSettings();
 fitTransform();
 rebuildPins();
-window.addEventListener("resize", function(){ render(); });
+window.addEventListener("resize", function(){ sizeCanvas(); render(); });
 if ("serviceWorker" in navigator){
   try { navigator.serviceWorker.register("sw.js"); } catch(e){}
 }
