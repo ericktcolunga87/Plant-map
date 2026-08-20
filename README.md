@@ -48,7 +48,8 @@ numbers erased). Keep it on your computer; you'll need it if you ever change the
 Go to **two doorways (or step just outside) at opposite ends of the building** — GPS is strongest
 there and outdoor points position you correctly indoors. At each: Menu → Add calibration point →
 tap your exact spot on the map → hold still ~30 s → Save. A 3rd point makes the app cross-check
-itself and show a fit error in feet; if one point shows a big "off by" value, delete and redo it.
+itself and show a fit error in feet; if one point shows a big "off by" value, delete and redo it. At 5+ well-spread points the app
+automatically switches to a tighter 6-parameter "precision fit."
 Calibration is per-phone and survives closing the app.
 
 ## Assets
@@ -57,7 +58,12 @@ Calibration is per-phone and survives closing the app.
   were erased from the image) — so **Add places a number on the map, Move moves it, Delete
   removes it**. A menu checkbox hides them all if you want a clean map.
 - **Find** (bottom bar): type a number → tap the match → the map jumps there with a blinking pink
-  marker. While tracking, a dashed line and live distance (in feet) connect you to it. The Find and manage
+  marker. While tracking, a dashed route follows the corridors to it and the chip shows the
+  walking distance along that route ("… ft walk"), recalculating as you move. The router reads
+  the map's colors (white = corridor, colored = department), so it prefers corridors but can cut
+  into a department for the last leg — it doesn't know where doors are, so treat it as
+  "go this way," not exact steps. If routing isn't possible (no calibration yet), it falls back
+  to a straight dashed line and straight-line feet. The Find and manage
   lists stay empty until you type, so hundreds of assets never make them long.
 - **Menu → Add / tag assets**: type a number, tap its spot, and it immediately asks for the next
   number — you can tag dozens in one walk. Typing an existing number offers to move it.

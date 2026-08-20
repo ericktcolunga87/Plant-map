@@ -147,6 +147,9 @@
       <g id="assetsG" class="hidden"></g>
       <line id="navLine" class="hidden" stroke="#ff2d78" stroke-width="2" stroke-dasharray="7 7"
             vector-effect="non-scaling-stroke" opacity=".8"/>
+      <polyline id="navPath" class="hidden" fill="none" stroke="#ff2d78" stroke-width="2.5"
+            stroke-dasharray="9 9" vector-effect="non-scaling-stroke" opacity=".9"
+            stroke-linejoin="round" stroke-linecap="round"/>
       <circle id="accC" fill="rgba(53,194,255,.13)" stroke="rgba(53,194,255,.55)" stroke-width="1.5"
               vector-effect="non-scaling-stroke" class="hidden"/>
       <g id="pinsG"></g>
@@ -336,6 +339,7 @@ var S = {
   pw:null,               // password kept in memory this session only
   assets:[], assetsLoaded:false, target:null, showAll:false,
   motion:{still:null, buf:[]},
+  nav:null, route:null,
   gpsMsg:null
 };
 var $ = function(id){ return document.getElementById(id); };
@@ -473,6 +477,7 @@ function useBlob(blob){
     $("noMap").classList.add("hidden");
     fitView(); rebuildAssetLayer(); render();
     loadAssets();
+    setTimeout(buildNavGrid, 60);
     maybeIntro();
   };
   img.src = URL.createObjectURL(blob);
@@ -594,6 +599,7 @@ function setTarget(a){
   S.view.scale = Math.min(S.maxScale, Math.max(S.minScale, goal));
   setFollow(false);
   centerOn(a.px, a.py);
+  planRoute();
   updateTargetDist(); render();
 }
 function clearTarget(){
@@ -601,6 +607,7 @@ function clearTarget(){
   $("targetChip").classList.add("hidden");
   var tg = $("targetG"); tg.classList.add("hidden"); unregisterCS(tg);
   $("navLine").classList.add("hidden");
+  S.route = null; syncRouteEls();
   updateTargetDist();
   render();
 }
@@ -613,9 +620,13 @@ function updateTargetDist(){
   var el = $("targetDist");
   if (!S.target){ el.textContent=""; return; }
   if (S.T && S.pos){
-    var p = geoToPixel(S.pos.lat, S.pos.lon);
-    var m = Math.hypot(S.target.px-p.x, S.target.py-p.y) / S.T.s;
-    el.textContent = Math.round(m*FT) + " ft";
+    if (S.route){
+      el.textContent = Math.round(S.route.distPx / S.T.s * FT) + " ft walk";
+    } else {
+      var p = geoToPixel(S.pos.lat, S.pos.lon);
+      var m = Math.hypot(S.target.px-p.x, S.target.py-p.y) / S.T.s;
+      el.textContent = Math.round(m*FT) + " ft";
+    }
   } else el.textContent = "\u2014";
 }
 
@@ -793,11 +804,11 @@ function render(){
     if (S.heading != null){
       var hr = S.heading * Math.PI/180;
       var mx = Math.sin(hr), my = -Math.cos(hr);
-      var vx = S.T.a*mx - S.T.b*my, vy = S.T.b*mx + S.T.a*my;
+      var vx = S.T.A11*mx + S.T.A12*my, vy = S.T.A21*mx + S.T.A22*my;
       wG.classList.remove("hidden");
       wG.setAttribute("transform","rotate(" + (Math.atan2(vy,vx)*180/Math.PI) + ")");
     } else { wG.classList.add("hidden"); }
-    if (S.target){
+    if (S.target && !S.route){
       line.classList.remove("hidden");
       line.setAttribute("x1",p.x); line.setAttribute("y1",p.y);
       line.setAttribute("x2",S.target.px); line.setAttribute("y2",S.target.py);
@@ -962,13 +973,34 @@ function fitTransform(){
     return;
   }
   var a = num_a/den, b = num_b/den;
-  var tx = Pm - (a*Xm - b*Ym), ty = Qm - (b*Xm + a*Ym);
-  var s = Math.hypot(a,b);
-  var T = {a:a,b:b,tx:tx,ty:ty,lat0:lat0,lon0:lon0,kLat:kLat,kLon:kLon,s:s,rmsM:null,res:[]};
+  var A11 = a, A12 = -b, A21 = b, A22 = a, type = "similarity";
+  var ttx = Pm - (A11*Xm + A12*Ym), tty = Qm - (A21*Xm + A22*Ym);
+  if (n >= 5){
+    // full 6-param affine (absorbs slight drawing scale differences between axes),
+    // but only when the points are spread in two dimensions, or it would overfit.
+    var Sxx=0,Sxy=0,Syy=0,Sxp=0,Syp=0,Sxq=0,Syq=0;
+    for (i=0;i<n;i++){
+      var cx=xs[i]-Xm, cy=ys[i]-Ym, cp=pts[i].px-Pm, cq=pts[i].py-Qm;
+      Sxx+=cx*cx; Sxy+=cx*cy; Syy+=cy*cy;
+      Sxp+=cx*cp; Syp+=cy*cp; Sxq+=cx*cq; Syq+=cy*cq;
+    }
+    var tr = (Sxx+Syy)/n, dt2 = (Sxx*Syy - Sxy*Sxy)/(n*n);
+    var lmin = (tr - Math.sqrt(Math.max(0, tr*tr - 4*dt2)))/2;   // narrow-axis variance, m^2
+    var det2 = Sxx*Syy - Sxy*Sxy;
+    if (Math.sqrt(Math.max(0,lmin)) >= 8 && det2 > 1e-6){
+      A11 = (Syy*Sxp - Sxy*Syp)/det2; A12 = (Sxx*Syp - Sxy*Sxp)/det2;
+      A21 = (Syy*Sxq - Sxy*Syq)/det2; A22 = (Sxx*Syq - Sxy*Sxq)/det2;
+      ttx = Pm - (A11*Xm + A12*Ym); tty = Qm - (A21*Xm + A22*Ym);
+      type = "affine";
+    }
+  }
+  var s = Math.sqrt(Math.abs(A11*A22 - A12*A21));
+  var T = {A11:A11,A12:A12,A21:A21,A22:A22,tx:ttx,ty:tty,
+           lat0:lat0,lon0:lon0,kLat:kLat,kLon:kLon,s:s,type:type,rmsM:null,res:[]};
   if (n >= 3){
     var se = 0;
     for (i=0;i<n;i++){
-      var ppx = a*xs[i] - b*ys[i] + tx, ppy = b*xs[i] + a*ys[i] + ty;
+      var ppx = A11*xs[i] + A12*ys[i] + ttx, ppy = A21*xs[i] + A22*ys[i] + tty;
       var dpx = Math.hypot(ppx-pts[i].px, ppy-pts[i].py);
       T.res.push(dpx/s);
       se += (dpx/s)*(dpx/s);
@@ -982,7 +1014,7 @@ function geoToPixel(lat, lon){
   var T = S.T;
   var x = (lon - T.lon0) * T.kLon;
   var y = -(lat - T.lat0) * T.kLat;
-  return { x: T.a*x - T.b*y + T.tx, y: T.b*x + T.a*y + T.ty };
+  return { x: T.A11*x + T.A12*y + T.tx, y: T.A21*x + T.A22*y + T.ty };
 }
 function saveCalib(){ try{ localStorage.setItem(LS_CAL, JSON.stringify(S.calib)); }catch(e){} }
 function loadCalib(){
@@ -1020,7 +1052,8 @@ function updateFitUI(msgOverride){
   else if (n === 0) line = "No points yet.";
   else if (n === 1) line = "1 point. Add at least 1 more, far from the first.";
   else if (n === 2) line = "2 points \u2014 tracking works. Add a 3rd to cross-check accuracy.";
-  else if (S.T && S.T.rmsM != null) line = n + " points \u00b7 self-check error \u00b1" + Math.round(S.T.rmsM*FT) + " ft" +
+  else if (S.T && S.T.rmsM != null) line = n + " points" + (S.T.type === "affine" ? " \u00b7 precision fit" : "") +
+       " \u00b7 self-check error \u00b1" + Math.round(S.T.rmsM*FT) + " ft" +
        (S.T.rmsM > 8 ? " \u2014 one point may be bad, check below." : "");
   else line = n + " points \u2014 spread them farther apart.";
   $("fitLine").textContent = line;
@@ -1200,6 +1233,160 @@ function plFilterStep(F, motionStill, lat, lon, acc, ts){
 /*FILTER-END*/
 var FLT = plNewFilter();
 
+/* ================= corridor routing ================= */
+/*NAV-BEGIN*/
+// Build a walk-cost grid from the map's colors: white corridors/rooms are cheap (1),
+// light-gray blends (corridor text, faint lines) near-cheap (2), the outside background
+// mid (3), department fills and dark blends expensive (6) but crossable, so routes
+// prefer corridors yet can enter a department for the last leg to a machine.
+function plBuildCost(data, w, h){
+  var bgR = data[0], bgG = data[1], bgB = data[2];   // top-left corner = page background
+  var cost = new Uint8Array(w*h), i, p;
+  for (i = 0; i < w*h; i++){
+    p = i*4;
+    var r = data[p], g = data[p+1], b = data[p+2];
+    var mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+    var c;
+    if (mn > 232) c = 1;
+    else if (mx - mn < 20 && mn > 185) c = 2;
+    else {
+      var dr = r-bgR, dg = g-bgG, db = b-bgB;
+      c = (dr*dr + dg*dg + db*db < 2025) ? 3 : 6;   // within 45 of background = outside
+    }
+    cost[i] = c;
+  }
+  return cost;
+}
+// A* over the cost grid, 8-connected, lazy-deletion binary heap.
+// Returns {cells:[[x,y],...] (collinear-merged), lenCells:path length in cell units} or null.
+function plRoute(cost, w, h, sx, sy, gx, gy){
+  var n = w*h;
+  var g = new Float32Array(n); g.fill(Infinity);
+  var came = new Int32Array(n); came.fill(-1);
+  var closed = new Uint8Array(n);
+  var hIdx = [], hF = [];
+  function push(i, f){
+    hIdx.push(i); hF.push(f);
+    var c = hIdx.length - 1;
+    while (c > 0){
+      var pa = (c-1) >> 1;
+      if (hF[pa] <= hF[c]) break;
+      var ti=hIdx[pa]; hIdx[pa]=hIdx[c]; hIdx[c]=ti;
+      var tf=hF[pa]; hF[pa]=hF[c]; hF[c]=tf;
+      c = pa;
+    }
+  }
+  function pop(){
+    var top = hIdx[0];
+    var li = hIdx.pop(), lf = hF.pop();
+    if (hIdx.length){
+      hIdx[0] = li; hF[0] = lf;
+      var c = 0;
+      for(;;){
+        var a = 2*c+1, b2 = 2*c+2, m = c;
+        if (a < hIdx.length && hF[a] < hF[m]) m = a;
+        if (b2 < hIdx.length && hF[b2] < hF[m]) m = b2;
+        if (m === c) break;
+        var ti=hIdx[m]; hIdx[m]=hIdx[c]; hIdx[c]=ti;
+        var tf=hF[m]; hF[m]=hF[c]; hF[c]=tf;
+        c = m;
+      }
+    }
+    return top;
+  }
+  var DX = [1,-1,0,0,1,1,-1,-1], DY = [0,0,1,-1,1,-1,1,-1];
+  var DD = [1,1,1,1,1.41421356,1.41421356,1.41421356,1.41421356];
+  var start = sy*w + sx, goal = gy*w + gx;
+  g[start] = 0;
+  push(start, 0);
+  while (hIdx.length){
+    var cur = pop();
+    if (closed[cur]) continue;
+    closed[cur] = 1;
+    if (cur === goal) break;
+    var cx = cur % w, cy = (cur - cx) / w;
+    for (var k = 0; k < 8; k++){
+      var nx = cx + DX[k], ny = cy + DY[k];
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      var ni = ny*w + nx;
+      if (closed[ni]) continue;
+      var ng = g[cur] + DD[k] * (cost[cur] + cost[ni]) / 2;
+      if (ng < g[ni]){
+        g[ni] = ng; came[ni] = cur;
+        var dx = Math.abs(nx-gx), dy = Math.abs(ny-gy);
+        push(ni, ng + Math.max(dx,dy) + 0.41421356*Math.min(dx,dy));
+      }
+    }
+  }
+  if (!closed[goal]) return null;
+  var cells = [], len = 0, at = goal;
+  while (at !== -1){
+    cells.push([at % w, (at - at % w) / w]);
+    at = came[at];
+  }
+  cells.reverse();
+  var out = [cells[0]], i;
+  for (i = 1; i < cells.length; i++){
+    var dx1 = cells[i][0]-cells[i-1][0], dy1 = cells[i][1]-cells[i-1][1];
+    len += Math.hypot(dx1, dy1);
+    if (i < cells.length - 1){
+      var dx2 = cells[i+1][0]-cells[i][0], dy2 = cells[i+1][1]-cells[i][1];
+      if (dx1 === dx2 && dy1 === dy2) continue;
+    }
+    out.push(cells[i]);
+  }
+  return {cells: out, lenCells: len};
+}
+/*NAV-END*/
+function buildNavGrid(){
+  try{
+    var gw = 512, gh = Math.max(2, Math.round(S.ih * gw / S.iw));
+    var oc = document.createElement("canvas");
+    oc.width = gw; oc.height = gh;
+    var octx = oc.getContext("2d");
+    octx.drawImage(img, 0, 0, gw, gh);
+    var d = octx.getImageData(0, 0, gw, gh).data;
+    S.nav = {cost: plBuildCost(d, gw, gh), w: gw, h: gh, cell: S.iw/gw};
+  }catch(e){ S.nav = null; }
+}
+function syncRouteEls(){
+  var pl = $("navPath");
+  if (S.route){
+    pl.setAttribute("points", S.route.ptsStr);
+    pl.classList.remove("hidden");
+  } else pl.classList.add("hidden");
+}
+function planRoute(){
+  if (!S.nav || !S.target || !S.pos || !S.T){ S.route = null; syncRouteEls(); return; }
+  var p = geoToPixel(S.pos.lat, S.pos.lon);
+  var c = S.nav.cell;
+  function cl(v, m){ return Math.min(m-1, Math.max(0, Math.round(v))); }
+  var r = plRoute(S.nav.cost, S.nav.w, S.nav.h,
+                  cl(p.x/c, S.nav.w), cl(p.y/c, S.nav.h),
+                  cl(S.target.px/c, S.nav.w), cl(S.target.py/c, S.nav.h));
+  if (!r){ S.route = null; syncRouteEls(); return; }
+  var pts = [[p.x, p.y]];
+  r.cells.forEach(function(cc){ pts.push([(cc[0]+0.5)*c, (cc[1]+0.5)*c]); });
+  pts.push([S.target.px, S.target.py]);
+  var distPx = r.lenCells * c
+    + Math.hypot(pts[1][0]-p.x, pts[1][1]-p.y)
+    + Math.hypot(S.target.px-pts[pts.length-2][0], S.target.py-pts[pts.length-2][1]);
+  S.route = {
+    ptsStr: pts.map(function(q){ return q[0].toFixed(1)+","+q[1].toFixed(1); }).join(" "),
+    distPx: distPx, ox: p.x, oy: p.y, t: Date.now()
+  };
+  syncRouteEls();
+}
+function maybePlanRoute(){
+  if (!S.target) return;
+  if (!S.route){ planRoute(); return; }
+  if (Date.now() - S.route.t < 2000) return;
+  if (S.T && S.pos){
+    var p = geoToPixel(S.pos.lat, S.pos.lon);
+    if (Math.hypot(p.x - S.route.ox, p.y - S.route.oy) / S.T.s > 6) planRoute();
+  }
+}
+
 /* ================= live tracking ================= */
 function setFollow(on){
   S.follow = on;
@@ -1226,6 +1413,7 @@ function startTrack(){
     S.pos = {lat:out.lat, lon:out.lon, acc:out.accD};
     S.posT = Date.now();
     if (S.follow && S.T){ var p = geoToPixel(S.pos.lat, S.pos.lon); centerOn(p.x, p.y); }
+    maybePlanRoute();
     updateTopbar(); updateTargetDist(); scheduleRender();
   }, function(err){
     if (err.code === 1) setGpsMsg("location blocked \u2014 tap for help", "bad");
