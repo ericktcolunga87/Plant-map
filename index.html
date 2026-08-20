@@ -1,0 +1,1346 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Plant Locator</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#12161c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root{
+    --bg:#0d1015; --chrome:#12161c; --panel:#1a212b; --line:#2a3442;
+    --text:#dbe4ee; --muted:#8fa0b3; --accent:#35c2ff; --target:#ff2d78;
+    --good:#3ddc84; --warn:#ffb648; --bad:#ff5d5d;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+    font-family:var(--sans);position:fixed;width:100%;overscroll-behavior:none;}
+  #viewport{position:absolute;inset:0;touch-action:none;overflow:hidden;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;}
+  #world{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;}
+  #mapimg{display:block;pointer-events:none;}
+  #overlay{position:absolute;left:0;top:0;pointer-events:none;}
+
+  #topbar{position:fixed;left:0;right:0;top:0;z-index:20;
+    padding:calc(var(--sat) + 8px) 14px 8px;display:flex;justify-content:space-between;gap:10px;
+    background:rgba(18,22,28,.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    border-bottom:1px solid var(--line);font-family:var(--mono);font-size:13px;}
+  #gpsStat{cursor:pointer;}
+  #gpsStat.good{color:var(--good)} #gpsStat.warn{color:var(--warn)} #gpsStat.bad{color:var(--bad)}
+  #fitStat{color:var(--muted);text-align:right;}
+
+  #targetChip{position:fixed;left:50%;transform:translateX(-50%);top:calc(var(--sat) + 44px);
+    z-index:21;display:flex;align-items:center;gap:8px;background:var(--panel);
+    border:1px solid var(--target);border-radius:999px;padding:6px 8px 6px 14px;
+    font-family:var(--mono);font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.45);}
+  #targetChip b{color:var(--target);font-weight:700;}
+  #targetChip button{padding:4px 9px;border-radius:999px;font-size:13px;}
+
+  #hint{position:fixed;left:12px;right:12px;top:calc(var(--sat) + 46px);z-index:25;
+    background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:12px;
+    font-size:14px;line-height:1.4;box-shadow:0 6px 24px rgba(0,0,0,.5);}
+  #hint .row{display:flex;gap:8px;margin-top:10px;}
+  #hintIn{flex:1;min-width:0;background:var(--chrome);border:1px solid var(--line);border-radius:9px;
+    color:var(--text);font-size:16px;padding:9px 10px;font-family:var(--mono);}
+
+  #searchWrap{position:fixed;left:0;right:0;top:0;z-index:26;
+    padding:calc(var(--sat) + 8px) 12px 10px;background:rgba(18,22,28,.96);
+    border-bottom:1px solid var(--line);}
+  #searchRow{display:flex;gap:8px;}
+  #searchIn{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    color:var(--text);font-size:17px;padding:11px 12px;font-family:var(--mono);}
+  #searchRes{margin-top:6px;max-height:45vh;overflow-y:auto;}
+  .srow{display:flex;justify-content:space-between;align-items:center;padding:11px 6px;
+    border-bottom:1px solid var(--line);font-family:var(--mono);font-size:16px;cursor:pointer;}
+  .srow span{color:var(--muted);font-size:12px;font-family:var(--sans);}
+
+  #bottombar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;gap:10px;
+    padding:10px 14px calc(var(--sab) + 10px);
+    background:rgba(18,22,28,.85);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+    border-top:1px solid var(--line);}
+  button{font-family:var(--sans);font-size:15px;border-radius:12px;border:1px solid var(--line);
+    background:var(--panel);color:var(--text);padding:12px 14px;cursor:pointer;}
+  button:active{filter:brightness(1.2);}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#08222e;font-weight:600;}
+  button.small{padding:7px 10px;font-size:13px;border-radius:9px;}
+  button.danger{color:var(--bad);border-color:#4a2a2e;}
+  button:disabled{opacity:.45;}
+  #btnTrack{flex:1.3;} #btnFind{flex:1;} #btnMenu{flex:.8;}
+  #btnCenter{position:fixed;right:14px;bottom:calc(var(--sab) + 76px);z-index:20;width:52px;height:52px;
+    border-radius:50%;font-size:22px;line-height:1;box-shadow:0 4px 14px rgba(0,0,0,.5);}
+  #btnCenter.on{color:var(--accent);border-color:var(--accent);}
+
+  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--chrome);
+    border-top:1px solid var(--line);border-radius:18px 18px 0 0;max-height:82%;
+    overflow-y:auto;padding:16px 16px calc(var(--sab) + 16px);
+    transform:translateY(105%);transition:transform .22s ease;}
+  .sheet.open{transform:translateY(0);}
+  .sheet h2{margin:0 0 4px;font-size:17px;}
+  .sheet h3{margin:20px 0 4px;font-size:14px;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.06em;border-top:1px solid var(--line);padding-top:16px;}
+  .sheet .sub{color:var(--muted);font-size:13px;line-height:1.45;margin:0 0 10px;}
+  .ptrow{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;}
+  .ptrow .meta{font-family:var(--mono);font-size:12.5px;color:var(--muted);}
+  .ptrow .btns{display:flex;gap:6px;}
+  #fitLine{font-family:var(--mono);font-size:13px;margin:10px 0;color:var(--text);}
+  .btncol{display:flex;flex-direction:column;gap:9px;margin-top:10px;}
+  #mgmtIn{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    color:var(--text);font-size:16px;padding:10px 11px;font-family:var(--mono);margin-top:10px;}
+  .chkrow{display:flex;align-items:center;gap:10px;padding:10px 0;font-size:14px;}
+  .chkrow input{width:20px;height:20px;}
+
+  .modal{position:fixed;inset:0;z-index:40;background:rgba(5,8,12,.72);display:flex;
+    align-items:center;justify-content:center;padding:20px;}
+  .card{background:var(--chrome);border:1px solid var(--line);border-radius:16px;
+    padding:18px;width:100%;max-width:380px;max-height:85vh;overflow-y:auto;}
+  .card h3{margin:0 0 6px;font-size:16px;}
+  .card .big{font-family:var(--mono);font-size:26px;margin:12px 0 2px;}
+  .card .note{color:var(--muted);font-size:13.5px;line-height:1.5;}
+  .card .warnnote{color:var(--warn);font-size:13px;line-height:1.45;margin-top:8px;}
+  .card .row{display:flex;gap:8px;margin-top:16px;}
+  .card .row button{flex:1;}
+  .card ol{margin:8px 0 0;padding-left:20px;color:var(--muted);font-size:13.5px;line-height:1.55;}
+  .card ol b, .card .note b{color:var(--text);}
+
+  #lockScreen{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;
+    align-items:center;justify-content:center;padding:24px;}
+  #lockBox{width:100%;max-width:320px;text-align:center;}
+  #lockBox .logo{width:72px;height:72px;border-radius:18px;margin:0 auto 14px;display:block;}
+  #lockBox h1{font-size:20px;margin:0 0 4px;}
+  #lockBox .note{color:var(--muted);font-size:13px;margin:0 0 18px;}
+  #pwIn{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    color:var(--text);font-size:17px;padding:13px 12px;text-align:center;letter-spacing:.05em;}
+  #btnUnlock{width:100%;margin-top:10px;}
+  #lockMsg{min-height:20px;font-size:13px;margin-top:12px;color:var(--bad);}
+  #lockMsg.ok{color:var(--muted);}
+
+  #toast{position:fixed;left:50%;transform:translateX(-50%);
+    bottom:calc(var(--sab) + 84px);z-index:50;background:var(--panel);
+    border:1px solid var(--line);border-radius:999px;padding:9px 16px;font-size:14px;
+    box-shadow:0 4px 16px rgba(0,0,0,.5);transition:opacity .25s;opacity:0;pointer-events:none;}
+  #toast.show{opacity:1;}
+
+  #noMap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;}
+  #noMap .card{max-width:320px;text-align:center;}
+  .hidden{display:none !important;}
+
+  .pulse{transform-box:fill-box;transform-origin:center;animation:pulse 2.2s ease-out infinite;}
+  @keyframes pulse{0%{transform:scale(1);opacity:.55}100%{transform:scale(3.4);opacity:0}}
+  .tpulse{transform-box:fill-box;transform-origin:center;animation:tpulse 1.1s ease-out infinite;}
+  @keyframes tpulse{0%{transform:scale(.6);opacity:.9}100%{transform:scale(2.6);opacity:0}}
+  @media (prefers-reduced-motion: reduce){.pulse,.tpulse{animation:none;opacity:.4}}
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <div id="world">
+    <img id="mapimg" alt="Plant map">
+    <svg id="overlay" xmlns="http://www.w3.org/2000/svg">
+      <g id="assetsG" class="hidden"></g>
+      <line id="navLine" class="hidden" stroke="#ff2d78" stroke-width="2" stroke-dasharray="7 7"
+            vector-effect="non-scaling-stroke" opacity=".8"/>
+      <circle id="accC" fill="rgba(53,194,255,.13)" stroke="rgba(53,194,255,.55)" stroke-width="1.5"
+              vector-effect="non-scaling-stroke" class="hidden"/>
+      <g id="pinsG"></g>
+      <g id="pendG" class="hidden">
+        <circle r="11" fill="rgba(255,93,93,.25)" stroke="#ff5d5d" stroke-width="2"/>
+        <circle r="2.5" fill="#ff5d5d"/>
+      </g>
+      <g id="targetG" class="hidden">
+        <circle class="tpulse" r="14" fill="none" stroke="#ff2d78" stroke-width="3"/>
+        <path d="M 0 -13 L 13 0 L 0 13 L -13 0 Z" fill="#ff2d78" stroke="#fff" stroke-width="2"/>
+      </g>
+      <g id="posG" class="hidden">
+        <circle class="pulse" r="9" fill="#35c2ff"/>
+        <g id="wedgeG" class="hidden">
+          <path d="M 12 0 L 30 -11 L 30 11 Z" fill="rgba(53,194,255,.85)"/>
+        </g>
+        <circle r="9" fill="#35c2ff" stroke="#fff" stroke-width="2.5"/>
+      </g>
+    </svg>
+  </div>
+  <div id="noMap" class="hidden">
+    <div class="card">
+      <h3>No map loaded</h3>
+      <p class="note">Host <span style="font-family:var(--mono)">map.enc</span> next to this page,
+        or load an image from this phone (it stays on this device only).</p>
+      <div class="row"><button id="btnPickMap2" class="primary">Load map image</button></div>
+    </div>
+  </div>
+</div>
+
+<div id="topbar">
+  <div id="gpsStat">GPS off</div>
+  <div id="fitStat">No calibration</div>
+</div>
+
+<div id="targetChip" class="hidden">
+  <b id="targetLabel"></b><span id="targetDist"></span>
+  <button id="btnTargetX">&#10005;</button>
+</div>
+
+<div id="hint" class="hidden">
+  <div id="hintText"></div>
+  <div class="row hidden" id="hintInRow">
+    <input id="hintIn" inputmode="numeric" autocomplete="off" placeholder="asset number">
+  </div>
+  <div class="row" id="hintBtns"></div>
+</div>
+
+<div id="searchWrap" class="hidden">
+  <div id="searchRow">
+    <input id="searchIn" type="search" inputmode="numeric" autocomplete="off" placeholder="Find asset number&hellip;">
+    <button id="btnSearchX">&#10005;</button>
+  </div>
+  <div id="searchRes"></div>
+</div>
+
+<button id="btnCenter" title="Follow my position">&#9678;</button>
+
+<div id="bottombar">
+  <button id="btnTrack" class="primary">Start tracking</button>
+  <button id="btnFind">Find</button>
+  <button id="btnMenu">Menu</button>
+</div>
+
+<div id="menuSheet" class="sheet">
+  <h2>Menu</h2>
+
+  <h3>Calibration</h3>
+  <p class="sub">Ties GPS to pixels on the map. Do it at doorways or just outside &mdash; GPS is
+    strongest there and the math carries indoors. Minimum 2 points; 3&ndash;4 spread far apart is best.</p>
+  <div id="ptList"></div>
+  <div id="fitLine">No points yet.</div>
+  <div class="btncol">
+    <button id="btnAdd" class="primary">+ Add calibration point</button>
+    <button id="btnClear" class="danger">Delete all points</button>
+  </div>
+
+  <h3>Assets (<span id="assetCount">0</span>)</h3>
+  <div class="btncol">
+    <button id="btnAssetAdd" class="primary">+ Add / tag assets</button>
+  </div>
+  <input id="mgmtIn" inputmode="numeric" autocomplete="off" placeholder="Filter assets to manage&hellip;">
+  <div id="mgmtList"></div>
+  <label class="chkrow"><input type="checkbox" id="chkShowAll"> Show all asset markers on the map</label>
+  <div class="btncol">
+    <button id="btnAssetExport">Export assets file (encrypted)</button>
+    <button id="btnAssetImport">Import assets file</button>
+    <button id="btnAssetSite">Reload assets from the website file</button>
+  </div>
+
+  <h3>Sensors</h3>
+  <p class="sub">Motion sensing makes the dot lock harder when you stand still and react faster
+    when you walk. Compass adds a rough heading wedge (steel skews it).</p>
+  <div class="btncol">
+    <button id="btnMotion">Enable motion &amp; compass</button>
+  </div>
+
+  <h3>Map &amp; security</h3>
+  <div class="btncol">
+    <button id="btnPickMap">Replace map image (stays on this phone)</button>
+    <button id="btnLock" class="danger">Lock &mdash; forget password on this phone</button>
+    <button id="btnCloseSheet">Close</button>
+  </div>
+  <input type="file" id="fileMap" accept="image/*" class="hidden">
+  <input type="file" id="fileAssets" class="hidden">
+</div>
+
+<div id="capModal" class="modal hidden">
+  <div class="card">
+    <h3>Capturing GPS&hellip; hold still</h3>
+    <div class="big" id="capStats">0 fixes</div>
+    <p class="note" id="capAcc">waiting for first fix</p>
+    <p class="warnnote hidden" id="capWarn">Weak signal here. A doorway, window, or outdoor
+      corner calibrates better &mdash; outdoor points work fine for indoor display.</p>
+    <div class="row">
+      <button id="btnCapCancel">Cancel</button>
+      <button id="btnCapSave" class="primary" disabled>Save point</button>
+    </div>
+  </div>
+</div>
+
+<div id="introModal" class="modal hidden">
+  <div class="card">
+    <h3>First step: calibrate</h3>
+    <p class="note">This app needs 2&ndash;3 reference points to line GPS up with your map.
+      <b>Go to two different doorways (or step just outside)</b> at opposite ends of the
+      building &mdash; GPS is strongest there, and outdoor points position you correctly indoors
+      too. At each one: tap your exact spot on the map, hold still ~30&nbsp;seconds, save.
+      A third point lets the app check its own accuracy.</p>
+    <div class="row">
+      <button id="btnIntroLater">Later</button>
+      <button id="btnIntroStart" class="primary">Start calibrating</button>
+    </div>
+  </div>
+</div>
+
+<div id="helpModal" class="modal hidden">
+  <div class="card">
+    <h3>Location blocked by the phone?</h3>
+    <p class="note">If the site never even asked, the block is in phone settings, not this app.</p>
+    <p class="note" style="margin-top:10px;"><b>iPhone:</b></p>
+    <ol>
+      <li>Settings &rarr; Privacy &amp; Security &rarr; Location Services: <b>ON</b></li>
+      <li>Same screen &rarr; <b>Safari Websites</b> &rarr; While Using the App, Precise <b>ON</b></li>
+      <li>In Safari on this page: <b>aA</b> button &rarr; Website Settings &rarr; Location &rarr; <b>Allow</b></li>
+      <li>Home-screen icon acting up? Test in plain Safari first, then re-add the icon.</li>
+    </ol>
+    <p class="note" style="margin-top:10px;"><b>Android:</b></p>
+    <ol>
+      <li>Chrome &rarr; &#8942; &rarr; Site settings for this site &rarr; Location &rarr; <b>Allow</b></li>
+      <li>Settings &rarr; Apps &rarr; Chrome &rarr; Permissions &rarr; Location: allow, Precise <b>ON</b></li>
+    </ol>
+    <div class="row"><button id="btnHelpX" class="primary">Close</button></div>
+  </div>
+</div>
+
+<div id="lockScreen">
+  <div id="lockBox">
+    <img class="logo" src="icon-192.png" alt="">
+    <h1>Plant Locator</h1>
+    <p class="note">The map is encrypted. Enter the password once on this phone.</p>
+    <input id="pwIn" type="password" autocomplete="current-password" placeholder="Password">
+    <button id="btnUnlock" class="primary">Unlock</button>
+    <div id="lockMsg"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+/* ================= state ================= */
+var S = {
+  view:{x:0,y:0,scale:0.15}, iw:0, ih:0, mapReady:false,
+  calib:[], T:null,
+  minScale:0.02, maxScale:14,
+  tracking:false, watchId:null, pos:null, posT:0,
+  follow:false, heading:null,
+  mode:"idle",           // idle | cal-placing | cal-placed | asset-place | asset-move
+  pend:null, pendNum:null, moveIdx:-1,
+  cap:{watchId:null, samples:[]},
+  wakeLock:null,
+  cred:null,             // {key:CryptoKey, salt:Uint8Array}
+  pw:null,               // password kept in memory this session only
+  assets:[], assetsLoaded:false, target:null, showAll:false,
+  motion:{still:null, buf:[]},
+  gpsMsg:null
+};
+var $ = function(id){ return document.getElementById(id); };
+var LS_CAL = "plantloc.calib.v1";
+var LS_SET = "plantloc.settings.v1";
+
+/* ================= IndexedDB kv ================= */
+function idb(){
+  return new Promise(function(res,rej){
+    var r = indexedDB.open("plantloc",1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore("kv"); };
+    r.onsuccess = function(){ res(r.result); };
+    r.onerror = function(){ rej(r.error); };
+  });
+}
+function idbGet(k){
+  return idb().then(function(db){
+    return new Promise(function(res,rej){
+      var t = db.transaction("kv").objectStore("kv").get(k);
+      t.onsuccess = function(){ res(t.result); };
+      t.onerror = function(){ rej(t.error); };
+    });
+  });
+}
+function idbSet(k,v){
+  return idb().then(function(db){
+    return new Promise(function(res,rej){
+      var t = db.transaction("kv","readwrite").objectStore("kv").put(v,k);
+      t.onsuccess = function(){ res(); };
+      t.onerror = function(){ rej(t.error); };
+    });
+  });
+}
+function idbDel(k){
+  return idb().then(function(db){
+    return new Promise(function(res,rej){
+      var t = db.transaction("kv","readwrite").objectStore("kv").delete(k);
+      t.onsuccess = function(){ res(); };
+      t.onerror = function(){ rej(t.error); };
+    });
+  });
+}
+
+/* ================= crypto ================= */
+/*CRYPTO-BEGIN*/
+var PL_ITER = 300000, PL_MAGIC = "PLENC1";
+function plParseEnc(buf){
+  var b = new Uint8Array(buf);
+  if (b.length < 35) throw new Error("file too short");
+  var magic = String.fromCharCode.apply(null, Array.prototype.slice.call(b, 0, 6));
+  if (magic !== PL_MAGIC) throw new Error("not an encrypted file");
+  return { salt: b.slice(6,22), nonce: b.slice(22,34), ct: b.slice(34) };
+}
+function plDeriveKey(pw, salt){
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"])
+    .then(function(km){
+      return crypto.subtle.deriveKey(
+        {name:"PBKDF2", salt:salt, iterations:PL_ITER, hash:"SHA-256"},
+        km, {name:"AES-GCM", length:256}, true, ["encrypt","decrypt"]);
+    });
+}
+function plDecrypt(key, parsed){
+  return crypto.subtle.decrypt({name:"AES-GCM", iv:parsed.nonce}, key, parsed.ct);
+}
+function plEncryptFile(key, salt, bytes){
+  var nonce = crypto.getRandomValues(new Uint8Array(12));
+  return crypto.subtle.encrypt({name:"AES-GCM", iv:nonce}, key, bytes).then(function(ct){
+    var c = new Uint8Array(ct);
+    var out = new Uint8Array(6 + 16 + 12 + c.length);
+    out.set(new TextEncoder().encode(PL_MAGIC), 0);
+    out.set(salt, 6); out.set(nonce, 22); out.set(c, 34);
+    return out;
+  });
+}
+/*CRYPTO-END*/
+
+/* ================= unlock flow ================= */
+var mapEncBuf = null;
+function fetchEnc(name, bust){
+  var opts = bust ? {cache:"reload"} : {};
+  return fetch(name, opts).then(function(r){
+    if (!r.ok) throw new Error(name + " notfound");
+    return r.arrayBuffer();
+  });
+}
+function lockMsg(t, ok){ var e=$("lockMsg"); e.textContent=t||""; e.className = ok?"ok":""; }
+function finishUnlock(mapBytes){
+  $("lockScreen").classList.add("hidden");
+  useBlob(new Blob([mapBytes], {type:"image/png"}));
+}
+function tryStoredCred(){
+  return idbGet("cred").then(function(c){
+    if (!c || !c.key) throw new Error("no cred");
+    S.cred = c;
+    lockMsg("Unlocking\u2026", true);
+    return fetchEnc("map.enc").then(function(buf){
+      mapEncBuf = buf;
+      var p = plParseEnc(buf);
+      return plDecrypt(c.key, p).then(function(plain){ finishUnlock(plain); });
+    });
+  });
+}
+function unlockWithPassword(){
+  var pw = $("pwIn").value;
+  if (!pw){ lockMsg("Enter the password."); return; }
+  if (!mapEncBuf){ lockMsg("Map file didn't load \u2014 check connection and reopen."); return; }
+  $("btnUnlock").disabled = true;
+  lockMsg("Checking\u2026", true);
+  var p;
+  try { p = plParseEnc(mapEncBuf); }
+  catch(e){ lockMsg("map.enc is not a valid encrypted file."); $("btnUnlock").disabled=false; return; }
+  plDeriveKey(pw, p.salt).then(function(key){
+    return plDecrypt(key, p).then(function(plain){
+      S.pw = pw;
+      S.cred = {key:key, salt:p.salt};
+      idbSet("cred", S.cred).catch(function(){});
+      finishUnlock(plain);
+    });
+  }).catch(function(){
+    lockMsg("Wrong password.");
+  }).then(function(){ $("btnUnlock").disabled = false; });
+}
+$("btnUnlock").addEventListener("click", unlockWithPassword);
+$("pwIn").addEventListener("keydown", function(e){ if (e.key === "Enter") unlockWithPassword(); });
+
+/* ================= map loading ================= */
+var img = $("mapimg"), ovl = $("overlay");
+function useBlob(blob){
+  img.onload = function(){
+    S.iw = img.naturalWidth; S.ih = img.naturalHeight; S.mapReady = true;
+    ovl.setAttribute("width", S.iw); ovl.setAttribute("height", S.ih);
+    ovl.setAttribute("viewBox", "0 0 " + S.iw + " " + S.ih);
+    $("noMap").classList.add("hidden");
+    fitView(); rebuildAssetLayer(); render();
+    loadAssets();
+    maybeIntro();
+  };
+  img.src = URL.createObjectURL(blob);
+}
+function loadLocalMapOrPrompt(){
+  idbGet("mapblob").then(function(b){
+    if (b) useBlob(b);
+    else { $("noMap").classList.remove("hidden"); loadAssets(); }
+  }).catch(function(){ $("noMap").classList.remove("hidden"); loadAssets(); });
+}
+function pickMap(){ $("fileMap").click(); }
+$("fileMap").addEventListener("change", function(e){
+  var f = e.target.files && e.target.files[0];
+  if (!f) return;
+  idbSet("mapblob", f).catch(function(){});
+  useBlob(f);
+  closeSheet();
+});
+$("btnPickMap").addEventListener("click", pickMap);
+$("btnPickMap2").addEventListener("click", pickMap);
+
+/* ================= assets ================= */
+function saveAssetsLocal(){
+  idbSet("assets", {v:1, mapW:S.iw||4096, mapH:S.ih||4040, assets:S.assets}).catch(function(){});
+  $("assetCount").textContent = S.assets.length;
+}
+function adoptPayload(p, label){
+  var sx = 1, sy = 1;
+  if (S.mapReady && p.mapW && p.mapH){
+    sx = S.iw / p.mapW; sy = S.ih / p.mapH;
+    if (Math.abs(sx/sy - 1) > 0.02) toast("Map shape changed \u2014 asset spots may be off");
+  }
+  S.assets = (p.assets||[]).map(function(a){
+    return {n:String(a.n), px:a.px*sx, py:a.py*sy};
+  });
+  saveAssetsLocal();
+  rebuildAssetLayer(); refreshMgmt(); render();
+  if (label) toast(S.assets.length + " assets loaded " + label);
+}
+function decryptAssetsBuf(buf){
+  var p = plParseEnc(buf);
+  var same = S.cred && S.cred.salt && S.cred.salt.length === p.salt.length &&
+    Array.prototype.every.call(S.cred.salt, function(v,i){ return v === p.salt[i]; });
+  var keyP = same ? Promise.resolve(S.cred.key)
+    : (S.pw ? plDeriveKey(S.pw, p.salt) : Promise.reject(new Error("locked")));
+  return keyP.then(function(k){ return plDecrypt(k, p); })
+    .then(function(plain){ return JSON.parse(new TextDecoder().decode(plain)); });
+}
+function loadAssets(){
+  if (S.assetsLoaded) return;
+  S.assetsLoaded = true;
+  idbGet("assets").then(function(local){
+    if (local && local.assets && local.assets.length){
+      adoptPayload(local, null);
+      return;
+    }
+    return fetchEnc("assets.enc").then(decryptAssetsBuf).then(function(p){ adoptPayload(p, "from site"); });
+  }).catch(function(){ /* none available anywhere: fine */ });
+}
+$("btnAssetSite").addEventListener("click", function(){
+  fetchEnc("assets.enc", true).then(decryptAssetsBuf).then(function(p){
+    adoptPayload(p, "from site");
+  }).catch(function(e){
+    toast(String(e.message).indexOf("locked")>=0 ? "Unlock with the password first" : "Couldn't load the site assets file");
+  });
+});
+$("btnAssetExport").addEventListener("click", function(){
+  if (!S.cred){ toast("Unlock with the password first"); return; }
+  var payload = {v:1, mapW:S.iw||4096, mapH:S.ih||4040, assets:S.assets};
+  plEncryptFile(S.cred.key, S.cred.salt, new TextEncoder().encode(JSON.stringify(payload)))
+    .then(function(bytes){
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], {type:"application/octet-stream"}));
+      a.download = "assets.enc";
+      document.body.appendChild(a); a.click(); a.remove();
+      toast("Exported \u2014 put assets.enc in the repo to share it");
+    });
+});
+$("btnAssetImport").addEventListener("click", function(){ $("fileAssets").click(); });
+$("fileAssets").addEventListener("change", function(e){
+  var f = e.target.files && e.target.files[0];
+  if (!f) return;
+  f.arrayBuffer().then(decryptAssetsBuf).then(function(p){ adoptPayload(p, "from file"); })
+    .catch(function(){ toast("Couldn't read that file (wrong password or format)"); });
+  e.target.value = "";
+});
+
+function rebuildAssetLayer(){
+  var g = $("assetsG"); g.innerHTML = "";
+  if (!S.showAll) { g.classList.add("hidden"); return; }
+  g.classList.remove("hidden");
+  S.assets.forEach(function(a){
+    var el = document.createElementNS("http://www.w3.org/2000/svg","g");
+    el.setAttribute("transform","translate("+a.px+","+a.py+")");
+    el.innerHTML = '<circle r="7" fill="#111826" stroke="#fff" stroke-width="2"/>' +
+      '<text y="-14" text-anchor="middle" font-size="26" font-weight="700" fill="#111826"' +
+      ' stroke="#ffffff" stroke-width="5" paint-order="stroke">' + a.n + '</text>';
+    g.appendChild(el);
+  });
+}
+$("chkShowAll").addEventListener("change", function(e){
+  S.showAll = e.target.checked;
+  saveSettings(); rebuildAssetLayer(); render();
+});
+
+/* --- find / target --- */
+function setTarget(a){
+  S.target = a;
+  $("targetLabel").textContent = a.n;
+  $("targetChip").classList.remove("hidden");
+  var tg = $("targetG");
+  tg.classList.remove("hidden");
+  registerCS(tg, a.px, a.py);
+  var vw = vp.clientWidth;
+  var goal = S.T ? Math.min(3, Math.max(0.4, vw / (80 * S.T.s))) : Math.max(S.view.scale, 0.8);
+  S.view.scale = Math.min(S.maxScale, Math.max(S.minScale, goal));
+  setFollow(false);
+  centerOn(a.px, a.py);
+  updateTargetDist(); render();
+}
+function clearTarget(){
+  S.target = null;
+  $("targetChip").classList.add("hidden");
+  var tg = $("targetG"); tg.classList.add("hidden"); unregisterCS(tg);
+  $("navLine").classList.add("hidden");
+  updateTargetDist();
+  render();
+}
+$("btnTargetX").addEventListener("click", clearTarget);
+$("targetChip").addEventListener("click", function(e){
+  if (e.target.id === "btnTargetX") return;
+  if (S.target){ centerOn(S.target.px, S.target.py); setFollow(false); render(); }
+});
+function updateTargetDist(){
+  var el = $("targetDist");
+  if (!S.target){ el.textContent=""; return; }
+  if (S.T && S.pos){
+    var p = geoToPixel(S.pos.lat, S.pos.lon);
+    var m = Math.hypot(S.target.px-p.x, S.target.py-p.y) / S.T.s;
+    el.textContent = m >= 1000 ? (m/1000).toFixed(2)+" km" : Math.round(m)+" m";
+  } else el.textContent = "\u2014";
+}
+
+function openSearch(){
+  $("searchWrap").classList.remove("hidden");
+  $("searchIn").value = ""; runSearch("");
+  setTimeout(function(){ $("searchIn").focus(); }, 50);
+}
+function closeSearch(){ $("searchWrap").classList.add("hidden"); $("searchIn").blur(); }
+$("btnFind").addEventListener("click", openSearch);
+$("btnSearchX").addEventListener("click", closeSearch);
+function sortedAssets(){
+  return S.assets.slice().sort(function(a,b){
+    return a.n.localeCompare(b.n, undefined, {numeric:true});
+  });
+}
+function runSearch(q){
+  q = q.trim();
+  var res = $("searchRes"); res.innerHTML = "";
+  var pool = sortedAssets();
+  var hits = q ? pool.filter(function(a){ return a.n.indexOf(q) === 0; })
+                 .concat(pool.filter(function(a){ return a.n.indexOf(q) > 0; })) : pool;
+  hits.slice(0, 12).forEach(function(a){
+    var row = document.createElement("div");
+    row.className = "srow";
+    var d = document.createElement("div"); d.textContent = a.n;
+    var s = document.createElement("span"); s.textContent = "show on map";
+    row.appendChild(d); row.appendChild(s);
+    row.addEventListener("click", function(){ setTarget(a); closeSearch(); });
+    res.appendChild(row);
+  });
+  if (!hits.length){
+    var e = document.createElement("div");
+    e.className = "srow"; e.style.cursor = "default";
+    e.innerHTML = "<div style='color:var(--muted);font-family:var(--sans);font-size:14px'>No match" +
+      (q ? " \u2014 add it under Menu \u2192 Assets." : " \u2014 no assets yet.") + "</div>";
+    res.appendChild(e);
+  }
+}
+$("searchIn").addEventListener("input", function(e){ runSearch(e.target.value); });
+$("searchIn").addEventListener("keydown", function(e){
+  if (e.key !== "Enter") return;
+  var q = e.target.value.trim();
+  var exact = S.assets.find(function(a){ return a.n === q; });
+  if (exact){ setTarget(exact); closeSearch(); }
+});
+
+/* --- asset add / move / manage --- */
+function startAssetAdd(){
+  closeSheet();
+  if (!S.mapReady){ toast("Load a map first"); return; }
+  S.mode = "idle";
+  showHint("Type an asset number, then you\u2019ll tap its spot on the map.",
+    [{label:"Done", fn:cancelPlacing},
+     {label:"Place on map", primary:true, fn:assetNumEntered}], true);
+  setTimeout(function(){ $("hintIn").focus(); }, 60);
+}
+function assetNumEntered(){
+  var n = $("hintIn").value.trim();
+  if (!n){ toast("Type a number first"); return; }
+  var existing = -1, i;
+  for (i=0;i<S.assets.length;i++) if (S.assets[i].n === n){ existing = i; break; }
+  if (existing >= 0){
+    S.moveIdx = existing; S.mode = "asset-move"; S.pendNum = n;
+    showHint(n + " already exists \u2014 tap the map to MOVE it, or Cancel.",
+      [{label:"Cancel", fn:cancelPlacing}]);
+  } else {
+    S.pendNum = n; S.mode = "asset-place";
+    showHint("Now tap " + n + "\u2019s exact spot on the map. Zoom in first for precision.",
+      [{label:"Cancel", fn:cancelPlacing}]);
+  }
+}
+$("btnAssetAdd").addEventListener("click", startAssetAdd);
+function refreshMgmt(){
+  var q = $("mgmtIn").value.trim();
+  var list = $("mgmtList"); list.innerHTML = "";
+  var pool = sortedAssets();
+  var hits = q ? pool.filter(function(a){ return a.n.indexOf(q) >= 0; }) : pool;
+  hits.slice(0, 30).forEach(function(a){
+    var row = document.createElement("div");
+    row.className = "ptrow";
+    var name = document.createElement("div");
+    name.style.fontFamily = "var(--mono)"; name.textContent = a.n;
+    var btns = document.createElement("div"); btns.className = "btns";
+    var bShow = document.createElement("button"); bShow.className="small"; bShow.textContent="Show";
+    bShow.addEventListener("click", function(){ closeSheet(); setTarget(a); });
+    var bMove = document.createElement("button"); bMove.className="small"; bMove.textContent="Move";
+    bMove.addEventListener("click", function(){
+      closeSheet();
+      S.moveIdx = S.assets.indexOf(a); S.pendNum = a.n; S.mode = "asset-move";
+      showHint("Tap the new spot for " + a.n + ".", [{label:"Cancel", fn:cancelPlacing}]);
+    });
+    var bDel = document.createElement("button"); bDel.className="small danger"; bDel.textContent="Del";
+    bDel.addEventListener("click", function(){
+      if (!confirm("Delete asset " + a.n + "?")) return;
+      var ix = S.assets.indexOf(a);
+      if (ix >= 0) S.assets.splice(ix,1);
+      saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt(); render();
+      if (S.target && S.target.n === a.n) clearTarget();
+    });
+    btns.appendChild(bShow); btns.appendChild(bMove); btns.appendChild(bDel);
+    row.appendChild(name); row.appendChild(btns); list.appendChild(row);
+  });
+  if (hits.length > 30){
+    var d = document.createElement("div"); d.className="sub";
+    d.textContent = "Showing 30 of " + hits.length + " \u2014 type more digits to narrow.";
+    list.appendChild(d);
+  }
+}
+$("mgmtIn").addEventListener("input", refreshMgmt);
+
+/* ================= view / rendering ================= */
+var world = $("world"), vp = $("viewport");
+function fitView(){
+  var vw = vp.clientWidth, vh = vp.clientHeight;
+  var s = Math.min(vw/S.iw, vh/S.ih) * 0.98;
+  S.minScale = s * 0.4;
+  S.view.scale = s;
+  S.view.x = (vw - S.iw*s)/2; S.view.y = (vh - S.ih*s)/2;
+}
+var csNodes = [];
+function registerCS(el, px, py){
+  unregisterCS(el);
+  csNodes.push({el:el, px:px, py:py});
+}
+function unregisterCS(el){
+  var i = csNodes.findIndex(function(n){ return n.el === el; });
+  if (i >= 0) csNodes.splice(i,1);
+}
+function render(){
+  world.style.transform = "translate(" + S.view.x + "px," + S.view.y + "px) scale(" + S.view.scale + ")";
+  var inv = 1/S.view.scale, i;
+  for (i=0;i<csNodes.length;i++){
+    var n = csNodes[i];
+    n.el.setAttribute("transform","translate("+n.px+","+n.py+") scale("+inv+")");
+  }
+  var posG = $("posG"), accC = $("accC"), wG = $("wedgeG"), line = $("navLine");
+  if (S.T && S.pos){
+    var p = geoToPixel(S.pos.lat, S.pos.lon);
+    posG.classList.remove("hidden");
+    posG.setAttribute("transform","translate("+p.x+","+p.y+") scale("+inv+")");
+    accC.classList.remove("hidden");
+    accC.setAttribute("cx",p.x); accC.setAttribute("cy",p.y);
+    accC.setAttribute("r", Math.max(1, S.pos.acc * S.T.s));
+    if (S.heading != null){
+      var hr = S.heading * Math.PI/180;
+      var mx = Math.sin(hr), my = -Math.cos(hr);
+      var vx = S.T.a*mx - S.T.b*my, vy = S.T.b*mx + S.T.a*my;
+      wG.classList.remove("hidden");
+      wG.setAttribute("transform","rotate(" + (Math.atan2(vy,vx)*180/Math.PI) + ")");
+    } else { wG.classList.add("hidden"); }
+    if (S.target){
+      line.classList.remove("hidden");
+      line.setAttribute("x1",p.x); line.setAttribute("y1",p.y);
+      line.setAttribute("x2",S.target.px); line.setAttribute("y2",S.target.py);
+    } else line.classList.add("hidden");
+  } else {
+    posG.classList.add("hidden"); accC.classList.add("hidden"); line.classList.add("hidden");
+  }
+}
+function screenToWorld(sx, sy){
+  var r = vp.getBoundingClientRect();
+  return { x:(sx - r.left - S.view.x)/S.view.scale, y:(sy - r.top - S.view.y)/S.view.scale };
+}
+function centerOn(px, py){
+  var vw = vp.clientWidth, vh = vp.clientHeight;
+  S.view.x = vw/2 - px*S.view.scale;
+  S.view.y = vh/2 - py*S.view.scale;
+}
+
+/* ================= pan / pinch / tap ================= */
+var ptrs = new Map(), tapStart = null;
+vp.addEventListener("pointerdown", function(e){
+  vp.setPointerCapture(e.pointerId);
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if (ptrs.size === 1) tapStart = {x:e.clientX, y:e.clientY, t:Date.now(), moved:false};
+  else tapStart = null;
+});
+vp.addEventListener("pointermove", function(e){
+  var old = ptrs.get(e.pointerId);
+  if (!old) return;
+  if (ptrs.size === 1){
+    var dx = e.clientX-old.x, dy = e.clientY-old.y;
+    S.view.x += dx; S.view.y += dy;
+    if (tapStart && Math.hypot(e.clientX-tapStart.x, e.clientY-tapStart.y) > 9) tapStart.moved = true;
+    if (dx || dy) setFollow(false);
+    ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    render();
+  } else if (ptrs.size === 2){
+    var other = null;
+    ptrs.forEach(function(v,k){ if (k !== e.pointerId) other = v; });
+    var oldMid = {x:(old.x+other.x)/2, y:(old.y+other.y)/2};
+    var newMid = {x:(e.clientX+other.x)/2, y:(e.clientY+other.y)/2};
+    var oldD = Math.hypot(old.x-other.x, old.y-other.y);
+    var newD = Math.hypot(e.clientX-other.x, e.clientY-other.y);
+    if (oldD > 0){
+      var r = vp.getBoundingClientRect();
+      var ns = Math.min(S.maxScale, Math.max(S.minScale, S.view.scale * newD/oldD));
+      var f = ns/S.view.scale;
+      var mx = oldMid.x - r.left, my = oldMid.y - r.top;
+      S.view.x = mx - f*(mx - S.view.x) + (newMid.x - oldMid.x);
+      S.view.y = my - f*(my - S.view.y) + (newMid.y - oldMid.y);
+      S.view.scale = ns;
+    }
+    setFollow(false);
+    ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    render();
+  }
+});
+function ptrEnd(e){
+  ptrs.delete(e.pointerId);
+  if (tapStart && !tapStart.moved && Date.now()-tapStart.t < 600 && ptrs.size === 0){
+    handleTap(tapStart.x, tapStart.y);
+  }
+  if (ptrs.size === 0) tapStart = null;
+}
+vp.addEventListener("pointerup", ptrEnd);
+vp.addEventListener("pointercancel", ptrEnd);
+vp.addEventListener("wheel", function(e){
+  e.preventDefault();
+  var r = vp.getBoundingClientRect();
+  var ns = Math.min(S.maxScale, Math.max(S.minScale, S.view.scale * Math.exp(-e.deltaY*0.0016)));
+  var f = ns/S.view.scale, mx = e.clientX-r.left, my = e.clientY-r.top;
+  S.view.x = mx - f*(mx - S.view.x);
+  S.view.y = my - f*(my - S.view.y);
+  S.view.scale = ns;
+  render();
+}, {passive:false});
+
+function handleTap(sx, sy){
+  if (!S.mapReady) return;
+  var w = screenToWorld(sx, sy);
+  if (w.x < 0 || w.y < 0 || w.x > S.iw || w.y > S.ih) return;
+  if (S.mode === "cal-placing" || S.mode === "cal-placed"){
+    S.pend = {px:w.x, py:w.y};
+    var g = $("pendG");
+    g.classList.remove("hidden");
+    registerCS(g, w.x, w.y);
+    S.mode = "cal-placed";
+    showHint("Pin dropped. Tap the map again to adjust it, then capture GPS while standing on that exact spot.",
+      [{label:"Capture GPS here", primary:true, fn:startCapture},
+       {label:"Cancel", fn:cancelPlacing}]);
+    render();
+  } else if (S.mode === "asset-place"){
+    S.assets.push({n:S.pendNum, px:w.x, py:w.y});
+    var savedNum = S.pendNum;
+    saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt(); render();
+    toast(savedNum + " saved");
+    startAssetAdd(); // batch mode: straight back to number entry
+  } else if (S.mode === "asset-move"){
+    if (S.moveIdx >= 0 && S.moveIdx < S.assets.length){
+      var a = S.assets[S.moveIdx];
+      a.px = w.x; a.py = w.y;
+      if (S.target && S.target.n === a.n){
+        S.target = a;
+        registerCS($("targetG"), w.x, w.y);
+      }
+      saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt(); render();
+      toast(a.n + " moved");
+    }
+    cancelPlacing();
+  }
+}
+
+/* ================= hint bar ================= */
+function showHint(text, btns, withInput){
+  $("hintText").textContent = text;
+  $("hintInRow").classList.toggle("hidden", !withInput);
+  if (withInput) $("hintIn").value = "";
+  var box = $("hintBtns"); box.innerHTML = "";
+  (btns||[]).forEach(function(b){
+    var el = document.createElement("button");
+    el.textContent = b.label;
+    el.className = "small" + (b.primary ? " primary" : "");
+    el.addEventListener("click", b.fn);
+    box.appendChild(el);
+  });
+  $("hint").classList.remove("hidden");
+}
+function hideHint(){ $("hint").classList.add("hidden"); $("hintInRow").classList.add("hidden"); }
+function cancelPlacing(){
+  S.mode = "idle"; S.pend = null; S.pendNum = null; S.moveIdx = -1;
+  var g = $("pendG"); g.classList.add("hidden"); unregisterCS(g);
+  hideHint(); render();
+}
+$("hintIn").addEventListener("keydown", function(e){
+  if (e.key === "Enter") assetNumEntered();
+});
+
+/* ================= calibration math ================= */
+function fitTransform(){
+  var pts = S.calib;
+  if (pts.length < 2){ S.T = null; updateFitUI(); return; }
+  var n = pts.length, i;
+  var lat0 = 0, lon0 = 0;
+  for (i=0;i<n;i++){ lat0 += pts[i].lat/n; lon0 += pts[i].lon/n; }
+  var kLat = 111320, kLon = 111320 * Math.cos(lat0 * Math.PI/180);
+  var xs=[], ys=[];
+  for (i=0;i<n;i++){
+    xs.push((pts[i].lon - lon0) * kLon);
+    ys.push(-(pts[i].lat - lat0) * kLat);
+  }
+  var Xm=0,Ym=0,Pm=0,Qm=0;
+  for (i=0;i<n;i++){ Xm+=xs[i]/n; Ym+=ys[i]/n; Pm+=pts[i].px/n; Qm+=pts[i].py/n; }
+  var num_a=0, num_b=0, den=0;
+  for (i=0;i<n;i++){
+    var x=xs[i]-Xm, y=ys[i]-Ym, p=pts[i].px-Pm, q=pts[i].py-Qm;
+    num_a += x*p + y*q;
+    num_b += x*q - y*p;
+    den   += x*x + y*y;
+  }
+  if (den < 4){
+    S.T = null; updateFitUI("Points are too close together to calibrate.");
+    return;
+  }
+  var a = num_a/den, b = num_b/den;
+  var tx = Pm - (a*Xm - b*Ym), ty = Qm - (b*Xm + a*Ym);
+  var s = Math.hypot(a,b);
+  var T = {a:a,b:b,tx:tx,ty:ty,lat0:lat0,lon0:lon0,kLat:kLat,kLon:kLon,s:s,rmsM:null,res:[]};
+  if (n >= 3){
+    var se = 0;
+    for (i=0;i<n;i++){
+      var ppx = a*xs[i] - b*ys[i] + tx, ppy = b*xs[i] + a*ys[i] + ty;
+      var dpx = Math.hypot(ppx-pts[i].px, ppy-pts[i].py);
+      T.res.push(dpx/s);
+      se += (dpx/s)*(dpx/s);
+    }
+    T.rmsM = Math.sqrt(se/n);
+  }
+  S.T = T;
+  updateFitUI();
+}
+function geoToPixel(lat, lon){
+  var T = S.T;
+  var x = (lon - T.lon0) * T.kLon;
+  var y = -(lat - T.lat0) * T.kLat;
+  return { x: T.a*x - T.b*y + T.tx, y: T.b*x + T.a*y + T.ty };
+}
+function saveCalib(){ try{ localStorage.setItem(LS_CAL, JSON.stringify(S.calib)); }catch(e){} }
+function loadCalib(){
+  try{
+    var v = JSON.parse(localStorage.getItem(LS_CAL) || "[]");
+    if (Array.isArray(v)) S.calib = v;
+  }catch(e){}
+}
+function saveSettings(){ try{ localStorage.setItem(LS_SET, JSON.stringify({showAll:S.showAll})); }catch(e){} }
+function loadSettings(){
+  try{
+    var v = JSON.parse(localStorage.getItem(LS_SET) || "{}");
+    S.showAll = !!v.showAll;
+    $("chkShowAll").checked = S.showAll;
+  }catch(e){}
+}
+
+/* ================= calibration UI ================= */
+function rebuildPins(){
+  var g = $("pinsG"); g.innerHTML = "";
+  csNodes = csNodes.filter(function(n){ return !n.el.__pin; });
+  S.calib.forEach(function(pt, i){
+    var pin = document.createElementNS("http://www.w3.org/2000/svg","g");
+    pin.__pin = true;
+    pin.innerHTML = '<circle r="12" fill="rgba(255,182,72,.92)" stroke="#0d1015" stroke-width="2"/>' +
+      '<text y="4.5" text-anchor="middle" font-size="13" font-weight="700" fill="#0d1015">' + (i+1) + '</text>';
+    g.appendChild(pin);
+    csNodes.push({el:pin, px:pt.px, py:pt.py});
+  });
+  render();
+}
+function updateFitUI(msgOverride){
+  var n = S.calib.length, line;
+  if (msgOverride) line = msgOverride;
+  else if (n === 0) line = "No points yet.";
+  else if (n === 1) line = "1 point. Add at least 1 more, far from the first.";
+  else if (n === 2) line = "2 points \u2014 tracking works. Add a 3rd to cross-check accuracy.";
+  else if (S.T && S.T.rmsM != null) line = n + " points \u00b7 self-check error \u00b1" + S.T.rmsM.toFixed(1) + " m" +
+       (S.T.rmsM > 8 ? " \u2014 one point may be bad, check below." : "");
+  else line = n + " points \u2014 spread them farther apart.";
+  $("fitLine").textContent = line;
+  var list = $("ptList"); list.innerHTML = "";
+  S.calib.forEach(function(pt, i){
+    var row = document.createElement("div"); row.className = "ptrow";
+    var res = (S.T && S.T.res && S.T.res[i] != null) ? " \u00b7 off " + S.T.res[i].toFixed(1) + " m" : "";
+    row.innerHTML = '<div>Point ' + (i+1) +
+      ' <div class="meta">GPS \u00b1' + pt.acc.toFixed(0) + ' m' + res + '</div></div>';
+    var del = document.createElement("button");
+    del.className = "small danger"; del.textContent = "Delete";
+    del.addEventListener("click", function(){
+      S.calib.splice(i,1); saveCalib(); fitTransform(); rebuildPins(); updateTopbar();
+    });
+    row.appendChild(del);
+    list.appendChild(row);
+  });
+  updateTopbar();
+}
+function openSheet(){ $("menuSheet").classList.add("open"); refreshMgmt(); }
+function closeSheet(){ $("menuSheet").classList.remove("open"); }
+$("btnMenu").addEventListener("click", openSheet);
+$("btnCloseSheet").addEventListener("click", closeSheet);
+$("btnAdd").addEventListener("click", function(){
+  closeSheet();
+  if (!S.mapReady){ toast("Load a map first"); return; }
+  S.mode = "cal-placing";
+  showHint("Walk to a spot you can point to exactly on the map (a door, a machine corner, an aisle intersection). Stand on it, then tap that exact spot on the map. Zoom in first for precision.",
+    [{label:"Cancel", fn:cancelPlacing}]);
+});
+$("btnClear").addEventListener("click", function(){
+  if (!confirm("Delete all calibration points?")) return;
+  S.calib = []; saveCalib(); fitTransform(); rebuildPins();
+});
+
+/* ================= GPS capture for calibration ================= */
+function startCapture(){
+  hideHint();
+  S.cap.samples = [];
+  $("capStats").textContent = "0 fixes";
+  $("capAcc").textContent = "waiting for first fix";
+  $("capWarn").classList.add("hidden");
+  $("btnCapSave").disabled = true;
+  $("capModal").classList.remove("hidden");
+  if (!navigator.geolocation){
+    $("capAcc").textContent = "Geolocation not available in this browser.";
+    return;
+  }
+  S.cap.watchId = navigator.geolocation.watchPosition(function(f){
+    S.cap.samples.push({lat:f.coords.latitude, lon:f.coords.longitude, acc:f.coords.accuracy});
+    var best = Infinity;
+    S.cap.samples.forEach(function(x){ if (x.acc < best) best = x.acc; });
+    $("capStats").textContent = S.cap.samples.length + " fixes";
+    $("capAcc").textContent = "best accuracy \u00b1" + best.toFixed(0) + " m \u2014 more fixes = steadier point";
+    $("capWarn").classList.toggle("hidden", best <= 25);
+    $("btnCapSave").disabled = S.cap.samples.length < 5;
+  }, function(err){
+    if (err.code === 1){
+      $("capAcc").textContent = "Location is blocked by the phone. Close this, then tap the GPS status (top-left) for the fix.";
+    } else {
+      $("capAcc").textContent = "No fix yet \u2014 it keeps trying. Moving nearer a door or window helps.";
+    }
+  }, {enableHighAccuracy:true, maximumAge:0, timeout:20000});
+}
+function stopCaptureWatch(){
+  if (S.cap.watchId != null){ navigator.geolocation.clearWatch(S.cap.watchId); S.cap.watchId = null; }
+}
+$("btnCapCancel").addEventListener("click", function(){
+  stopCaptureWatch();
+  $("capModal").classList.add("hidden");
+  showHint("Capture cancelled. The pin is still placed \u2014 capture again, tap to move it, or cancel.",
+    [{label:"Capture GPS here", primary:true, fn:startCapture},
+     {label:"Cancel", fn:cancelPlacing}]);
+});
+$("btnCapSave").addEventListener("click", function(){
+  stopCaptureWatch();
+  var sw=0, slat=0, slon=0, best=Infinity;
+  S.cap.samples.forEach(function(x){
+    var w = 1/(x.acc*x.acc);
+    sw += w; slat += w*x.lat; slon += w*x.lon;
+    if (x.acc < best) best = x.acc;
+  });
+  S.calib.push({lat:slat/sw, lon:slon/sw, acc:best, px:S.pend.px, py:S.pend.py});
+  saveCalib();
+  $("capModal").classList.add("hidden");
+  cancelPlacing();
+  fitTransform(); rebuildPins();
+  var n = S.calib.length;
+  if (n < 2) showHint("Point saved. Add at least one more, far from this one.", [{label:"OK", fn:hideHint}]);
+  else if (n === 2) showHint("Point saved \u2014 tracking works now. A 3rd point lets the app cross-check its own accuracy.", [{label:"OK", fn:hideHint}]);
+  else hideHint();
+});
+
+/* ================= adaptive position filter ================= */
+/*FILTER-BEGIN*/
+function plNewFilter(){
+  return {ok:false, lat0:0, lon0:0, kLat:111320, kLon:0,
+          x:0, y:0, P:0,          // slow (displayed) estimate + its variance, meters
+          fx:0, fy:0,             // fast EMA of raw fixes, meters
+          lastT:0, lastRaw:null, mode:"still",
+          gapRun:0, movingUntil:0, calmSince:0, rejRun:0, accD:null};
+}
+// motionStill: true = accelerometer says the phone is physically still,
+//              false = it says the phone is moving, null = unknown/no permission.
+// Returns null when the fix is rejected as junk, else {lat, lon, accD, mode}.
+function plFilterStep(F, motionStill, lat, lon, acc, ts){
+  var QS = 0.04, QM = 9, ALPHA = 0.35;
+  if (!isFinite(acc) || acc <= 0) acc = 50;
+  if (acc > 150){
+    F.rejRun++;
+    if (F.rejRun < 6) return null;
+  }
+  if (!F.ok){
+    F.ok = true;
+    F.lat0 = lat; F.lon0 = lon;
+    F.kLon = 111320 * Math.cos(lat * Math.PI/180);
+    F.x = 0; F.y = 0; F.fx = 0; F.fy = 0;
+    F.P = acc*acc;
+    F.lastT = ts; F.lastRaw = {x:0, y:0, t:ts};
+    F.accD = acc; F.rejRun = 0;
+    return {lat:lat, lon:lon, accD:acc, mode:F.mode};
+  }
+  var zx = (lon - F.lon0) * F.kLon;
+  var zy = -(lat - F.lat0) * F.kLat;
+  // teleport gate: physically impossible jump between consecutive raw fixes
+  var rdt = Math.min(10, Math.max(0.2, (ts - F.lastRaw.t)/1000));
+  var vRaw = Math.hypot(zx - F.lastRaw.x, zy - F.lastRaw.y) / rdt;
+  F.lastRaw = {x:zx, y:zy, t:ts};
+  if (vRaw > 12 && acc > 20){
+    F.rejRun++;
+    if (F.rejRun < 3) return null;
+  }
+  F.rejRun = 0;
+  // fast tracker follows raw closely; the gap between fast and slow detects real movement
+  F.fx += ALPHA * (zx - F.fx);
+  F.fy += ALPHA * (zy - F.fy);
+  var dt = Math.min(10, Math.max(0.2, (ts - F.lastT)/1000));
+  var q;
+  if (F.mode === "moving") q = QM;
+  else if (motionStill === true) q = QS * 0.25;
+  else if (motionStill === false) q = 0.6;
+  else q = QS;
+  F.P += q * dt;
+  var gap = Math.hypot(F.fx - F.x, F.fy - F.y);
+  if (F.mode === "still"){
+    var thresh = Math.max(5, 0.45 * acc) * (motionStill === false ? 0.7 : 1);
+    if (gap > thresh && motionStill !== true) F.gapRun++;
+    else F.gapRun = 0;
+    var need = (motionStill === false) ? 1 : 2;
+    if (F.gapRun >= need){
+      F.mode = "moving";
+      F.movingUntil = ts + 5000;
+      F.x += 0.6 * (F.fx - F.x);
+      F.y += 0.6 * (F.fy - F.y);
+      F.P = Math.max(F.P, 16);
+      F.gapRun = 0;
+    }
+  }
+  var R = acc*acc;
+  var Reff = (F.mode === "moving") ? Math.max(25, R * 0.25) : R;
+  var K = F.P / (F.P + Reff);
+  F.x += K * (zx - F.x);
+  F.y += K * (zy - F.y);
+  F.P *= (1 - K);
+  if (F.P < 0.4) F.P = 0.4;
+  if (F.mode === "moving"){
+    var gap2 = Math.hypot(F.fx - F.x, F.fy - F.y);
+    if (gap2 < 3 && ts > F.movingUntil){
+      if (!F.calmSince) F.calmSince = ts;
+      if (ts - F.calmSince > 5000){ F.mode = "still"; F.calmSince = 0; }
+    } else F.calmSince = 0;
+  }
+  F.lastT = ts;
+  F.accD = F.accD * 0.7 + acc * 0.3;
+  return {lat: F.lat0 + (-F.y)/F.kLat, lon: F.lon0 + F.x/F.kLon, accD: F.accD, mode: F.mode};
+}
+/*FILTER-END*/
+var FLT = plNewFilter();
+
+/* ================= live tracking ================= */
+function setFollow(on){
+  S.follow = on;
+  $("btnCenter").classList.toggle("on", on);
+}
+$("btnCenter").addEventListener("click", function(){
+  setFollow(true);
+  if (S.T && S.pos){ var p = geoToPixel(S.pos.lat, S.pos.lon); centerOn(p.x, p.y); render(); }
+});
+function startTrack(){
+  if (!navigator.geolocation){ setGpsMsg("no geolocation", "bad"); return; }
+  S.tracking = true;
+  FLT = plNewFilter();
+  $("btnTrack").textContent = "Stop tracking";
+  $("btnTrack").classList.remove("primary");
+  setGpsMsg("acquiring\u2026", "");
+  setFollow(true);
+  reqWake();
+  S.watchId = navigator.geolocation.watchPosition(function(f){
+    S.gpsMsg = null;
+    var out = plFilterStep(FLT, S.motion.still, f.coords.latitude, f.coords.longitude,
+                           f.coords.accuracy, f.timestamp || Date.now());
+    if (!out) return; // junk fix rejected
+    S.pos = {lat:out.lat, lon:out.lon, acc:out.accD};
+    S.posT = Date.now();
+    if (S.follow && S.T){ var p = geoToPixel(S.pos.lat, S.pos.lon); centerOn(p.x, p.y); }
+    updateTopbar(); updateTargetDist(); scheduleRender();
+  }, function(err){
+    if (err.code === 1) setGpsMsg("location blocked \u2014 tap for help", "bad");
+    else setGpsMsg("searching for signal\u2026", "warn");
+  }, {enableHighAccuracy:true, maximumAge:0, timeout:20000});
+}
+function stopTrack(){
+  S.tracking = false;
+  if (S.watchId != null){ navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
+  $("btnTrack").textContent = "Start tracking";
+  $("btnTrack").classList.add("primary");
+  setGpsMsg("GPS off", "");
+  relWake();
+}
+$("btnTrack").addEventListener("click", function(){ S.tracking ? stopTrack() : startTrack(); });
+function setGpsMsg(t, cls){
+  S.gpsMsg = t;
+  var el = $("gpsStat");
+  el.textContent = t; el.className = cls || "";
+}
+function updateTopbar(){
+  if (S.tracking && S.pos && !S.gpsMsg){
+    var age = Math.round((Date.now()-S.posT)/1000);
+    var el = $("gpsStat");
+    el.textContent = "\u00b1" + S.pos.acc.toFixed(0) + " m \u00b7 " + age + "s" +
+      (FLT.mode === "still" ? " \u00b7 avg" : "");
+    el.className = S.pos.acc < 10 ? "good" : (S.pos.acc < 25 ? "warn" : "bad");
+  }
+  var n = S.calib.length, f = $("fitStat");
+  if (n < 2) f.textContent = "Needs " + (2-n) + " more cal point" + (n===1?"":"s");
+  else if (S.T && S.T.rmsM != null) f.textContent = n + " pts \u00b7 \u00b1" + S.T.rmsM.toFixed(1) + " m fit";
+  else f.textContent = n + " pts";
+}
+setInterval(function(){ updateTopbar(); updateTargetDist(); }, 1000);
+$("gpsStat").addEventListener("click", function(){ $("helpModal").classList.remove("hidden"); });
+$("btnHelpX").addEventListener("click", function(){ $("helpModal").classList.add("hidden"); });
+if (navigator.permissions && navigator.permissions.query){
+  try{
+    navigator.permissions.query({name:"geolocation"}).then(function(st){
+      var warn = function(){
+        if (st.state === "denied") setGpsMsg("location blocked \u2014 tap for help", "bad");
+      };
+      warn();
+      st.onchange = warn;
+    }).catch(function(){});
+  }catch(e){}
+}
+
+/* ================= motion + compass ================= */
+function onOrient(e){
+  var h = null;
+  if (typeof e.webkitCompassHeading === "number") h = e.webkitCompassHeading;
+  else if (e.absolute === true && typeof e.alpha === "number") h = (360 - e.alpha) % 360;
+  if (h != null){ S.heading = h; scheduleRender(); }
+}
+function onMotion(e){
+  var a = e.acceleration;
+  if (!a || a.x == null) return;
+  var mag = Math.hypot(a.x, a.y, a.z);
+  var buf = S.motion.buf;
+  buf.push(mag);
+  if (buf.length > 60) buf.shift();
+  if (buf.length >= 20){
+    var s = 0, i;
+    for (i=0;i<buf.length;i++) s += buf[i]*buf[i];
+    var rms = Math.sqrt(s/buf.length);
+    if (rms > 0.9) S.motion.still = false;
+    else if (rms < 0.45) S.motion.still = true;
+  }
+}
+var rAF = false;
+function scheduleRender(){
+  if (rAF) return;
+  rAF = true;
+  requestAnimationFrame(function(){ rAF = false; render(); });
+}
+$("btnMotion").addEventListener("click", function(){
+  var DOE = window.DeviceOrientationEvent, DME = window.DeviceMotionEvent;
+  var pOri = (DOE && typeof DOE.requestPermission === "function")
+    ? DOE.requestPermission().catch(function(){ return "denied"; }) : Promise.resolve("granted");
+  var pMot = (DME && typeof DME.requestPermission === "function")
+    ? DME.requestPermission().catch(function(){ return "denied"; }) : Promise.resolve("granted");
+  Promise.all([pOri, pMot]).then(function(r){
+    if (r[0] === "granted"){
+      window.addEventListener("deviceorientationabsolute", onOrient);
+      window.addEventListener("deviceorientation", onOrient);
+    }
+    if (r[1] === "granted") window.addEventListener("devicemotion", onMotion);
+    if (r[0] === "granted" || r[1] === "granted"){
+      $("btnMotion").textContent = "Motion & compass on";
+    } else toast("Permission was denied");
+  });
+});
+
+/* ================= wake lock ================= */
+function reqWake(){
+  if (!("wakeLock" in navigator)) return;
+  navigator.wakeLock.request("screen").then(function(w){ S.wakeLock = w; }).catch(function(){});
+}
+function relWake(){
+  if (S.wakeLock){ S.wakeLock.release().catch(function(){}); S.wakeLock = null; }
+}
+document.addEventListener("visibilitychange", function(){
+  if (document.visibilityState === "visible" && S.tracking) reqWake();
+});
+
+/* ================= misc UI ================= */
+var toastTimer = null;
+function toast(t){
+  var el = $("toast");
+  el.textContent = t; el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ el.classList.remove("show"); }, 2600);
+}
+var introShown = false;
+function maybeIntro(){
+  if (introShown || S.calib.length > 0) return;
+  introShown = true;
+  $("introModal").classList.remove("hidden");
+}
+$("btnIntroLater").addEventListener("click", function(){ $("introModal").classList.add("hidden"); });
+$("btnIntroStart").addEventListener("click", function(){
+  $("introModal").classList.add("hidden");
+  S.mode = "cal-placing";
+  showHint("Go to your first doorway (or step just outside). Stand still on a spot you can point to on the map, then tap that exact spot. Zoom in first.",
+    [{label:"Cancel", fn:cancelPlacing}]);
+});
+$("btnLock").addEventListener("click", function(){
+  if (!confirm("Forget the password on this phone? You'll have to type it again next time.")) return;
+  idbDel("cred").then(function(){ location.reload(); }, function(){ location.reload(); });
+});
+
+/* ================= boot ================= */
+loadCalib();
+loadSettings();
+fitTransform();
+rebuildPins();
+window.addEventListener("resize", function(){ render(); });
+if ("serviceWorker" in navigator){
+  try { navigator.serviceWorker.register("sw.js"); } catch(e){}
+}
+tryStoredCred().catch(function(){
+  // no stored credential (or it failed): fetch the encrypted map, then ask for the password.
+  fetchEnc("map.enc").then(function(buf){
+    mapEncBuf = buf;
+    lockMsg("");
+    setTimeout(function(){ $("pwIn").focus(); }, 100);
+  }).catch(function(){
+    // no map.enc hosted at all: local-image mode, no password needed
+    $("lockScreen").classList.add("hidden");
+    loadLocalMapOrPrompt();
+  });
+});
+</script>
+</body>
+</html>

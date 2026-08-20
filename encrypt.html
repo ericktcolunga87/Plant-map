@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plant Locator — map encryptor</title>
+<style>
+  :root{--bg:#0d1015;--chrome:#12161c;--panel:#1a212b;--line:#2a3442;--text:#dbe4ee;
+    --muted:#8fa0b3;--accent:#35c2ff;--bad:#ff5d5d;--good:#3ddc84;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  *{box-sizing:border-box;}
+  body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);
+    font-family:var(--sans);display:flex;align-items:center;justify-content:center;padding:24px;}
+  .card{background:var(--chrome);border:1px solid var(--line);border-radius:16px;
+    padding:22px;width:100%;max-width:420px;}
+  h1{font-size:19px;margin:0 0 6px;}
+  p{color:var(--muted);font-size:13.5px;line-height:1.5;margin:0 0 16px;}
+  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 5px;}
+  input[type=password]{width:100%;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;color:var(--text);font-size:16px;padding:11px 12px;}
+  input[type=file]{width:100%;color:var(--muted);font-size:14px;}
+  button{width:100%;margin-top:18px;font-size:16px;border-radius:12px;border:1px solid var(--accent);
+    background:var(--accent);color:#08222e;font-weight:600;padding:13px;cursor:pointer;}
+  button:disabled{opacity:.45;cursor:default;}
+  #msg{min-height:22px;margin-top:14px;font-size:13.5px;color:var(--muted);}
+  #msg.err{color:var(--bad);} #msg.ok{color:var(--good);}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Encrypt the plant map</h1>
+  <p>Runs entirely on this computer &mdash; nothing is uploaded anywhere. Pick your original map
+    image, choose a password, and it produces <b style="color:var(--text)">map.enc</b>. Upload that
+    file to the GitHub repo (replacing the old one). To change the password later, just run this
+    again. After a password change: unlock the app on your phone with the new password, then
+    re-export and re-upload <b style="color:var(--text)">assets.enc</b> from the app's menu.</p>
+  <label>Map image (PNG or JPG)</label>
+  <input type="file" id="file" accept="image/*">
+  <label>Password</label>
+  <input type="password" id="pw1" autocomplete="new-password">
+  <label>Password again</label>
+  <input type="password" id="pw2" autocomplete="new-password">
+  <button id="go" disabled>Encrypt &amp; download map.enc</button>
+  <div id="msg"></div>
+</div>
+<script>
+"use strict";
+var PL_ITER = 300000, PL_MAGIC = "PLENC1";
+var fileEl = document.getElementById("file");
+var pw1 = document.getElementById("pw1"), pw2 = document.getElementById("pw2");
+var go = document.getElementById("go"), msg = document.getElementById("msg");
+function say(t, cls){ msg.textContent = t || ""; msg.className = cls || ""; }
+function check(){
+  go.disabled = !(fileEl.files && fileEl.files[0] && pw1.value && pw1.value === pw2.value);
+  if (pw1.value && pw2.value && pw1.value !== pw2.value) say("Passwords don't match.", "err");
+  else say("");
+}
+fileEl.addEventListener("change", check);
+pw1.addEventListener("input", check);
+pw2.addEventListener("input", check);
+go.addEventListener("click", function(){
+  if (!(window.crypto && crypto.subtle)){
+    say("This browser blocks crypto on local files \u2014 open this page in Chrome or Edge.", "err");
+    return;
+  }
+  go.disabled = true;
+  say("Encrypting\u2026");
+  var f = fileEl.files[0];
+  f.arrayBuffer().then(function(data){
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var nonce = crypto.getRandomValues(new Uint8Array(12));
+    return crypto.subtle.importKey("raw", new TextEncoder().encode(pw1.value), "PBKDF2", false, ["deriveKey"])
+      .then(function(km){
+        return crypto.subtle.deriveKey({name:"PBKDF2", salt:salt, iterations:PL_ITER, hash:"SHA-256"},
+          km, {name:"AES-GCM", length:256}, false, ["encrypt"]);
+      })
+      .then(function(key){ return crypto.subtle.encrypt({name:"AES-GCM", iv:nonce}, key, data); })
+      .then(function(ct){
+        var c = new Uint8Array(ct);
+        var out = new Uint8Array(6 + 16 + 12 + c.length);
+        out.set(new TextEncoder().encode(PL_MAGIC), 0);
+        out.set(salt, 6); out.set(nonce, 22); out.set(c, 34);
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(new Blob([out], {type:"application/octet-stream"}));
+        a.download = "map.enc";
+        document.body.appendChild(a); a.click(); a.remove();
+        say("Done \u2014 map.enc downloaded. Upload it to the repo.", "ok");
+      });
+  }).catch(function(e){
+    say("Failed: " + e.message, "err");
+  }).then(function(){ go.disabled = false; });
+});
+</script>
+</body>
+</html>
