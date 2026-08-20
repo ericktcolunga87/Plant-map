@@ -1,4 +1,4 @@
-var CACHE = "plantloc-v2";
+var CACHE = "plantloc-v3";
 var ASSETS = ["./", "index.html", "map.enc", "assets.enc", "manifest.json",
               "icon-192.png", "icon-512.png", "encrypt.html"];
 

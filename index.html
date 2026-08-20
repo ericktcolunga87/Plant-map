@@ -225,12 +225,14 @@
   </div>
 
   <h3>Assets (<span id="assetCount">0</span>)</h3>
+  <p class="sub">The numbers drawn on the map come from this list — adding, moving, or deleting
+    an asset changes the map itself.</p>
   <div class="btncol">
     <button id="btnAssetAdd" class="primary">+ Add / tag assets</button>
   </div>
   <input id="mgmtIn" inputmode="numeric" autocomplete="off" placeholder="Filter assets to manage&hellip;">
   <div id="mgmtList"></div>
-  <label class="chkrow"><input type="checkbox" id="chkShowAll"> Show all asset markers on the map</label>
+  <label class="chkrow"><input type="checkbox" id="chkShowAll" checked> Show asset numbers on the map</label>
   <div class="btncol">
     <button id="btnAssetExport">Export assets file (encrypted)</button>
     <button id="btnAssetImport">Import assets file</button>
@@ -337,7 +339,7 @@ var S = {
 };
 var $ = function(id){ return document.getElementById(id); };
 var LS_CAL = "plantloc.calib.v1";
-var LS_SET = "plantloc.settings.v1";
+var LS_SET = "plantloc.settings.v2";
 
 /* ================= IndexedDB kv ================= */
 function idb(){
@@ -555,6 +557,9 @@ $("fileAssets").addEventListener("change", function(e){
   e.target.value = "";
 });
 
+function escXml(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
 function rebuildAssetLayer(){
   var g = $("assetsG"); g.innerHTML = "";
   if (!S.showAll) { g.classList.add("hidden"); return; }
@@ -562,9 +567,9 @@ function rebuildAssetLayer(){
   S.assets.forEach(function(a){
     var el = document.createElementNS("http://www.w3.org/2000/svg","g");
     el.setAttribute("transform","translate("+a.px+","+a.py+")");
-    el.innerHTML = '<circle r="7" fill="#111826" stroke="#fff" stroke-width="2"/>' +
-      '<text y="-14" text-anchor="middle" font-size="26" font-weight="700" fill="#111826"' +
-      ' stroke="#ffffff" stroke-width="5" paint-order="stroke">' + a.n + '</text>';
+    el.innerHTML = '<text dy="0.35em" text-anchor="middle" font-size="20" font-weight="700"' +
+      ' fill="#111826" stroke="#ffffff" stroke-width="4" paint-order="stroke"' +
+      ' font-family="Arial, sans-serif">' + escXml(a.n) + '</text>';
     g.appendChild(el);
   });
 }
@@ -627,9 +632,17 @@ function sortedAssets(){
 function runSearch(q){
   q = q.trim();
   var res = $("searchRes"); res.innerHTML = "";
+  if (!q){
+    var e0 = document.createElement("div");
+    e0.className = "srow"; e0.style.cursor = "default";
+    e0.innerHTML = "<div style='color:var(--muted);font-family:var(--sans);font-size:14px'>Type an asset number \u2014 " +
+      S.assets.length + " saved.</div>";
+    res.appendChild(e0);
+    return;
+  }
   var pool = sortedAssets();
-  var hits = q ? pool.filter(function(a){ return a.n.indexOf(q) === 0; })
-                 .concat(pool.filter(function(a){ return a.n.indexOf(q) > 0; })) : pool;
+  var hits = pool.filter(function(a){ return a.n.indexOf(q) === 0; })
+             .concat(pool.filter(function(a){ return a.n.indexOf(q) > 0; }));
   hits.slice(0, 12).forEach(function(a){
     var row = document.createElement("div");
     row.className = "srow";
@@ -684,8 +697,14 @@ $("btnAssetAdd").addEventListener("click", startAssetAdd);
 function refreshMgmt(){
   var q = $("mgmtIn").value.trim();
   var list = $("mgmtList"); list.innerHTML = "";
+  if (!q){
+    var d0 = document.createElement("div"); d0.className = "sub";
+    d0.textContent = "Type digits above to pull up assets to Show / Move / Delete.";
+    list.appendChild(d0);
+    return;
+  }
   var pool = sortedAssets();
-  var hits = q ? pool.filter(function(a){ return a.n.indexOf(q) >= 0; }) : pool;
+  var hits = pool.filter(function(a){ return a.n.indexOf(q) >= 0; });
   hits.slice(0, 30).forEach(function(a){
     var row = document.createElement("div");
     row.className = "ptrow";
@@ -957,7 +976,7 @@ function saveSettings(){ try{ localStorage.setItem(LS_SET, JSON.stringify({showA
 function loadSettings(){
   try{
     var v = JSON.parse(localStorage.getItem(LS_SET) || "{}");
-    S.showAll = !!v.showAll;
+    S.showAll = (v.showAll !== false);   // default ON
     $("chkShowAll").checked = S.showAll;
   }catch(e){}
 }

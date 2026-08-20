@@ -10,15 +10,15 @@ leaves the page.
 | File | Purpose |
 |---|---|
 | `index.html` | The entire app |
-| `map.enc` | Your map, AES-256 encrypted with the password |
+| `map.enc` | Your map (printed machine numbers erased — the app draws them live), AES-256 encrypted |
 | `assets.enc` | Encrypted asset list (starts with 25 machine numbers auto-read off the map) |
 | `encrypt.html` | Tool to (re-)encrypt a map / change the password (contains no secrets) |
 | `sw.js`, `manifest.json`, `icon-192.png`, `icon-512.png` | Offline cache + home-screen install |
 | `README.md` | This file |
 
-**Do NOT upload** `map-original-KEEP-OFF-GITHUB.png` — that's your unencrypted map. Keep it on
-your computer; you'll need it if you ever change the password (open `encrypt.html`, pick it,
-type the new password, upload the new `map.enc`).
+**Do NOT upload** `map-clean-KEEP-OFF-GITHUB.png` — that's your unencrypted map (machine
+numbers erased). Keep it on your computer; you'll need it if you ever change the password
+(open `encrypt.html`, pick it, type the new password, upload the new `map.enc`).
 
 ## Deploying / redeploying
 
@@ -53,8 +53,12 @@ Calibration is per-phone and survives closing the app.
 
 ## Assets
 
+- The machine numbers you see on the map are drawn live from the asset list (the printed ones
+  were erased from the image) — so **Add places a number on the map, Move moves it, Delete
+  removes it**. A menu checkbox hides them all if you want a clean map.
 - **Find** (bottom bar): type a number → tap the match → the map jumps there with a blinking pink
-  marker. While tracking, a dashed line and live distance connect you to it.
+  marker. While tracking, a dashed line and live distance connect you to it. The Find and manage
+  lists stay empty until you type, so hundreds of assets never make them long.
 - **Menu → Add / tag assets**: type a number, tap its spot, and it immediately asks for the next
   number — you can tag dozens in one walk. Typing an existing number offers to move it.
 - Tags save on the phone instantly. To share them (or back them up): Menu → **Export assets file**,
