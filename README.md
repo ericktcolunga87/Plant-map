@@ -65,8 +65,10 @@ Calibration is per-phone and survives closing the app.
   "go this way," not exact steps. If routing isn't possible (no calibration yet), it falls back
   to a straight dashed line and straight-line feet. The Find and manage
   lists stay empty until you type, so hundreds of assets never make them long.
-- **Menu → Add / tag assets**: type a number, tap its spot, and it immediately asks for the next
-  number — you can tag dozens in one walk. Typing an existing number offers to move it.
+- **Menu → Add / tag assets**: type a number, tap its spot, then **drag the pin** to fine-tune
+  (or tap elsewhere to jump it) and hit Save — it immediately asks for the next number, so you
+  can tag dozens in one walk. Typing an existing number drops a draggable pin on it to move it,
+  as does Move in the asset list. The calibration pin drags the same way.
 - Tags save on the phone instantly. To share them (or back them up): Menu → **Export assets file**,
   then upload that `assets.enc` to the repo. Other phones pick it up via Menu → **Reload assets
   from the website file** (or automatically on a fresh install).

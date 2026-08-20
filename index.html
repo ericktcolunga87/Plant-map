@@ -158,6 +158,8 @@
               vector-effect="non-scaling-stroke" class="hidden"/>
       <g id="pinsG"></g>
       <g id="pendG" class="hidden">
+        <line x1="-26" y1="0" x2="26" y2="0" stroke="#ff5d5d" stroke-width="1"/>
+        <line x1="0" y1="-26" x2="0" y2="26" stroke="#ff5d5d" stroke-width="1"/>
         <circle r="11" fill="rgba(255,93,93,.25)" stroke="#ff5d5d" stroke-width="2"/>
         <circle r="2.5" fill="#ff5d5d"/>
       </g>
@@ -335,8 +337,9 @@ var S = {
   minScale:0.02, maxScale:14,
   tracking:false, watchId:null, pos:null, posT:0,
   follow:false, heading:null,
-  mode:"idle",           // idle | cal-placing | cal-placed | asset-place | asset-move
+  mode:"idle",           // idle | cal-placing | cal-placed | asset-place | asset-adjust
   pend:null, pendNum:null, moveIdx:-1,
+  dragPin:false, dragOff:{x:0,y:0},
   cap:{watchId:null, samples:[]},
   wakeLock:null,
   cred:null,             // {key:CryptoKey, salt:Uint8Array}
@@ -731,9 +734,8 @@ function assetNumEntered(){
   var existing = -1, i;
   for (i=0;i<S.assets.length;i++) if (S.assets[i].n === n){ existing = i; break; }
   if (existing >= 0){
-    S.moveIdx = existing; S.mode = "asset-move"; S.pendNum = n;
-    showHint(n + " already exists \u2014 tap the map to MOVE it, or Cancel.",
-      [{label:"Cancel", fn:cancelPlacing}]);
+    toast(n + " already exists \u2014 drag it to move it");
+    startMoveAdjust(existing);
   } else {
     S.pendNum = n; S.mode = "asset-place";
     showHint("Now tap " + n + "\u2019s exact spot on the map. Zoom in first for precision.",
@@ -763,8 +765,7 @@ function refreshMgmt(){
     var bMove = document.createElement("button"); bMove.className="small"; bMove.textContent="Move";
     bMove.addEventListener("click", function(){
       closeSheet();
-      S.moveIdx = S.assets.indexOf(a); S.pendNum = a.n; S.mode = "asset-move";
-      showHint("Tap the new spot for " + a.n + ".", [{label:"Cancel", fn:cancelPlacing}]);
+      startMoveAdjust(S.assets.indexOf(a));
     });
     var bDel = document.createElement("button"); bDel.className="small danger"; bDel.textContent="Del";
     bDel.addEventListener("click", function(){
@@ -870,13 +871,35 @@ var ptrs = new Map(), tapStart = null;
 vp.addEventListener("pointerdown", function(e){
   vp.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
-  if (ptrs.size === 1) tapStart = {x:e.clientX, y:e.clientY, t:Date.now(), moved:false};
-  else tapStart = null;
+  if (ptrs.size === 1){
+    tapStart = {x:e.clientX, y:e.clientY, t:Date.now(), moved:false};
+    if ((S.mode === "asset-adjust" || S.mode === "cal-placed") && S.pend){
+      var r = vp.getBoundingClientRect();
+      var mx = S.pend.px*S.view.scale + S.view.x;
+      var my = S.pend.py*S.view.scale + S.view.y;
+      var dx = (e.clientX - r.left) - mx, dy = (e.clientY - r.top) - my;
+      if (dx*dx + dy*dy < 34*34){
+        S.dragPin = true;
+        S.dragOff = {x:dx, y:dy};
+        tapStart = null;
+      }
+    }
+  } else {
+    tapStart = null;
+    S.dragPin = false;   // second finger = pinch, not pin drag
+  }
 });
 vp.addEventListener("pointermove", function(e){
   var old = ptrs.get(e.pointerId);
   if (!old) return;
   if (ptrs.size === 1){
+    if (S.dragPin){
+      var w2 = screenToWorld(e.clientX - S.dragOff.x, e.clientY - S.dragOff.y);
+      updatePend(w2.x, w2.y);
+      ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+      scheduleRender();
+      return;
+    }
     var dx = e.clientX-old.x, dy = e.clientY-old.y;
     S.view.x += dx; S.view.y += dy;
     if (tapStart && Math.hypot(e.clientX-tapStart.x, e.clientY-tapStart.y) > 9) tapStart.moved = true;
@@ -906,6 +929,7 @@ vp.addEventListener("pointermove", function(e){
 });
 function ptrEnd(e){
   ptrs.delete(e.pointerId);
+  S.dragPin = false;
   if (tapStart && !tapStart.moved && Date.now()-tapStart.t < 600 && ptrs.size === 0){
     handleTap(tapStart.x, tapStart.y);
   }
@@ -929,36 +953,71 @@ function handleTap(sx, sy){
   var w = screenToWorld(sx, sy);
   if (w.x < 0 || w.y < 0 || w.x > S.iw || w.y > S.ih) return;
   if (S.mode === "cal-placing" || S.mode === "cal-placed"){
-    S.pend = {px:w.x, py:w.y};
-    var g = $("pendG");
-    g.classList.remove("hidden");
-    registerCS(g, w.x, w.y);
+    updatePend(w.x, w.y);
     S.mode = "cal-placed";
-    showHint("Pin dropped. Tap the map again to adjust it, then capture GPS while standing on that exact spot.",
+    showHint("Pin dropped. Drag it to fine-tune (or tap to jump it), then capture GPS while standing on that exact spot.",
       [{label:"Capture GPS here", primary:true, fn:startCapture},
        {label:"Cancel", fn:cancelPlacing}]);
     render();
   } else if (S.mode === "asset-place"){
-    S.assets.push({n:S.pendNum, px:w.x, py:w.y});
-    var savedNum = S.pendNum;
-    saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt(); render();
-    toast(savedNum + " saved");
-    startAssetAdd(); // batch mode: straight back to number entry
-  } else if (S.mode === "asset-move"){
-    if (S.moveIdx >= 0 && S.moveIdx < S.assets.length){
-      var a = S.assets[S.moveIdx];
-      a.px = w.x; a.py = w.y;
-      if (S.target && S.target.n === a.n){
-        S.target = a;
-        registerCS($("targetG"), w.x, w.y);
-      }
-      saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt(); render();
-      toast(a.n + " moved");
-    }
-    cancelPlacing();
+    updatePend(w.x, w.y);
+    S.mode = "asset-adjust";
+    adjustHint();
+    render();
+  } else if (S.mode === "asset-adjust"){
+    updatePend(w.x, w.y);
+    render();
   } else if (S.mode === "idle"){
     deptTapSelect(w.x, w.y);
   }
+}
+
+function updatePend(px, py){
+  px = Math.min(S.iw, Math.max(0, px));
+  py = Math.min(S.ih, Math.max(0, py));
+  S.pend = {px:px, py:py};
+  var g = $("pendG");
+  g.classList.remove("hidden");
+  registerCS(g, px, py);
+}
+function adjustHint(){
+  var label = S.moveIdx >= 0 ? ("Save " + S.assets[S.moveIdx].n + " here")
+                             : ("Save " + S.pendNum + " here");
+  showHint("Drag the pin to fine-tune it, or tap elsewhere on the map to jump it there.",
+    [{label:label, primary:true, fn:saveAdjust},
+     {label:"Cancel", fn:cancelPlacing}]);
+}
+function saveAdjust(){
+  if (!S.pend) return;
+  if (S.moveIdx >= 0){
+    var a = S.assets[S.moveIdx];
+    a.px = S.pend.px; a.py = S.pend.py;
+    if (S.target && S.target.n === a.n){
+      S.target = a;
+      registerCS($("targetG"), a.px, a.py);
+    }
+    saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt();
+    toast(a.n + " moved");
+    cancelPlacing();
+  } else {
+    var num = S.pendNum;
+    S.assets.push({n:num, px:S.pend.px, py:S.pend.py});
+    saveAssetsLocal(); rebuildAssetLayer(); refreshMgmt();
+    toast(num + " saved");
+    cancelPlacing();
+    startAssetAdd();   // batch mode: straight back to number entry
+  }
+  render();
+}
+function startMoveAdjust(i){
+  var a = S.assets[i];
+  S.moveIdx = i; S.pendNum = a.n; S.mode = "asset-adjust";
+  updatePend(a.px, a.py);
+  if (S.view.scale < 0.8) S.view.scale = 1.2;
+  centerOn(a.px, a.py);
+  setFollow(false);
+  adjustHint();
+  render();
 }
 
 /* ================= hint bar ================= */
