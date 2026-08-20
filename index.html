@@ -59,6 +59,10 @@
   .srow{display:flex;justify-content:space-between;align-items:center;padding:11px 6px;
     border-bottom:1px solid var(--line);font-family:var(--mono);font-size:16px;cursor:pointer;}
   .srow span{color:var(--muted);font-size:12px;font-family:var(--sans);}
+  .dgrid{display:flex;flex-wrap:wrap;gap:8px;padding:10px 2px 4px;}
+  .dchip{display:flex;align-items:center;gap:7px;font-size:13.5px;padding:8px 11px;border-radius:999px;}
+  .dchip .dot,.srow .dot{width:13px;height:13px;border-radius:4px;border:1px solid rgba(0,0,0,.5);flex:none;display:inline-block;}
+  .shint{color:var(--muted);font-size:13px;padding:8px 4px 2px;font-family:var(--sans);}
 
   #bottombar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;gap:10px;
     padding:10px 14px calc(var(--sab) + 10px);
@@ -200,7 +204,7 @@
 
 <div id="searchWrap" class="hidden">
   <div id="searchRow">
-    <input id="searchIn" type="search" inputmode="numeric" autocomplete="off" placeholder="Find asset number&hellip;">
+    <input id="searchIn" type="search" autocomplete="off" placeholder="Asset # or department&hellip;">
     <button id="btnSearchX">&#10005;</button>
   </div>
   <div id="searchRes"></div>
@@ -340,6 +344,7 @@ var S = {
   assets:[], assetsLoaded:false, target:null, showAll:false,
   motion:{still:null, buf:[]},
   nav:null, route:null,
+  dept:null, deptIdx:null, blinkOn:true, blinkTimer:null,
   gpsMsg:null
 };
 var $ = function(id){ return document.getElementById(id); };
@@ -477,7 +482,9 @@ function useBlob(blob){
     $("noMap").classList.add("hidden");
     fitView(); rebuildAssetLayer(); render();
     loadAssets();
+    S.deptIdx = null; clearDept();
     setTimeout(buildNavGrid, 60);
+    setTimeout(buildDeptIndex, 400);
     maybeIntro();
   };
   img.src = URL.createObjectURL(blob);
@@ -588,6 +595,7 @@ $("chkShowAll").addEventListener("change", function(e){
 
 /* --- find / target --- */
 function setTarget(a){
+  clearDept();
   S.target = a;
   $("targetLabel").textContent = a.n;
   $("targetChip").classList.remove("hidden");
@@ -611,10 +619,11 @@ function clearTarget(){
   updateTargetDist();
   render();
 }
-$("btnTargetX").addEventListener("click", clearTarget);
+$("btnTargetX").addEventListener("click", function(){ clearTarget(); clearDept(); });
 $("targetChip").addEventListener("click", function(e){
   if (e.target.id === "btnTargetX") return;
-  if (S.target){ centerOn(S.target.px, S.target.py); setFollow(false); render(); }
+  if (S.dept){ zoomToBbox(S.dept.bbox); render(); }
+  else if (S.target){ centerOn(S.target.px, S.target.py); setFollow(false); render(); }
 });
 function updateTargetDist(){
   var el = $("targetDist");
@@ -647,13 +656,37 @@ function runSearch(q){
   q = q.trim();
   var res = $("searchRes"); res.innerHTML = "";
   if (!q){
-    var e0 = document.createElement("div");
-    e0.className = "srow"; e0.style.cursor = "default";
-    e0.innerHTML = "<div style='color:var(--muted);font-family:var(--sans);font-size:14px'>Type an asset number \u2014 " +
-      S.assets.length + " saved.</div>";
-    res.appendChild(e0);
+    var hint = document.createElement("div");
+    hint.className = "shint";
+    hint.textContent = "Tap a department, or type an asset number (" + S.assets.length + " saved).";
+    res.appendChild(hint);
+    var grid = document.createElement("div"); grid.className = "dgrid";
+    DEPTS.forEach(function(D, i){
+      var ch = document.createElement("button");
+      ch.className = "dchip";
+      var dot = document.createElement("span"); dot.className = "dot";
+      dot.style.background = "rgb(" + D.r + "," + D.g + "," + D.b + ")";
+      ch.appendChild(dot); ch.appendChild(document.createTextNode(D.n));
+      ch.addEventListener("click", function(){ closeSearch(); selectDept(i); });
+      grid.appendChild(ch);
+    });
+    res.appendChild(grid);
     return;
   }
+  var ql = q.toLowerCase();
+  DEPTS.forEach(function(D, i){
+    if (D.n.toLowerCase().indexOf(ql) < 0) return;
+    var row = document.createElement("div"); row.className = "srow";
+    var dd = document.createElement("div");
+    var dot = document.createElement("span"); dot.className = "dot";
+    dot.style.background = "rgb(" + D.r + "," + D.g + "," + D.b + ")";
+    dot.style.marginRight = "8px";
+    dd.appendChild(dot); dd.appendChild(document.createTextNode(D.n));
+    var sp = document.createElement("span"); sp.textContent = "department";
+    row.appendChild(dd); row.appendChild(sp);
+    row.addEventListener("click", function(){ closeSearch(); selectDept(i); });
+    res.appendChild(row);
+  });
   var pool = sortedAssets();
   var hits = pool.filter(function(a){ return a.n.indexOf(q) === 0; })
              .concat(pool.filter(function(a){ return a.n.indexOf(q) > 0; }));
@@ -666,11 +699,11 @@ function runSearch(q){
     row.addEventListener("click", function(){ setTarget(a); closeSearch(); });
     res.appendChild(row);
   });
-  if (!hits.length){
+  if (!hits.length && !res.childNodes.length){
     var e = document.createElement("div");
     e.className = "srow"; e.style.cursor = "default";
     e.innerHTML = "<div style='color:var(--muted);font-family:var(--sans);font-size:14px'>No match" +
-      (q ? " \u2014 add it under Menu \u2192 Assets." : " \u2014 no assets yet.") + "</div>";
+      " \u2014 assets are added under Menu \u2192 Assets.</div>";
     res.appendChild(e);
   }
 }
@@ -786,6 +819,11 @@ function render(){
   if (S.mapReady){
     ctx.setTransform(S.view.scale*dpr, 0, 0, S.view.scale*dpr, S.view.x*dpr, S.view.y*dpr);
     ctx.drawImage(img, 0, 0);
+    if (S.dept && S.dept.mask){
+      ctx.globalAlpha = REDUCED_MOTION ? 0.55 : (S.blinkOn ? 0.8 : 0.28);
+      ctx.drawImage(S.dept.mask, 0, 0, S.iw, S.ih);
+      ctx.globalAlpha = 1;
+    }
   }
   world.style.transform = "translate(" + S.view.x + "px," + S.view.y + "px) scale(" + S.view.scale + ")";
   var inv = 1/S.view.scale, i;
@@ -918,6 +956,8 @@ function handleTap(sx, sy){
       toast(a.n + " moved");
     }
     cancelPlacing();
+  } else if (S.mode === "idle"){
+    deptTapSelect(w.x, w.y);
   }
 }
 
@@ -1376,6 +1416,163 @@ function planRoute(){
     distPx: distPx, ox: p.x, oy: p.y, t: Date.now()
   };
   syncRouteEls();
+}
+/* ================= departments ================= */
+var DEPTS = [
+  {n:"Tool Grinding",r:171,g:113,b:160},
+  {n:"Heat Treat",r:231,g:190,b:204},
+  {n:"Tool Crib",r:195,g:195,b:195},
+  {n:"Warehouse",r:255,g:201,b:14},
+  {n:"Scrap Dock",r:255,g:254,b:145},
+  {n:"Recieving",r:88,g:19,b:94},
+  {n:"Shipping",r:129,g:127,b:38},
+  {n:"UE/Repair",r:112,g:255,b:143},
+  {n:"Test Kitchen",r:153,g:123,b:112},
+  {n:"Gym",r:64,g:82,b:117},
+  {n:"Lathe",r:239,g:228,b:176},
+  {n:"Assembly",r:240,g:188,b:128},
+  {n:"EDM",r:127,g:127,b:127},
+  {n:"Tool & Die",r:181,g:230,b:29},
+  {n:"Drilling",r:112,g:146,b:190},
+  {n:"Milling",r:153,g:217,b:234},
+  {n:"Knife",r:75,g:171,b:96},
+  {n:"Punch Press",r:238,g:138,b:248},
+  {n:"Maintenance",r:237,g:28,b:36},
+  {n:"Inv. Foundry",r:255,g:242,b:0},
+  {n:"No Bake",r:23,g:230,b:37},
+  {n:"Sheet Metal",r:185,g:122,b:87},
+  {n:"Precision Grinding",r:63,g:72,b:204},
+  {n:"Cell Manufacturing",r:255,g:127,b:39},
+  {n:"CP Fabrication",r:0,g:162,b:232}
+];
+var REDUCED_MOTION = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+// classify one RGB against the legend colors; -1 = corridor/background/none
+function deptClassify(r, g, b){
+  var mx = Math.max(r,g,b), mn = Math.min(r,g,b);
+  if (mn > 232 || mx < 70) return -1;
+  // background lavender exclusion kept tight: Heat Treat pink is only ~46 away from it
+  var dbg = (r-216)*(r-216) + (g-206)*(g-206) + (b-245)*(b-245);
+  if (dbg < 1200) return -1;
+  var best = -1, bd = 2500, i;
+  for (i = 0; i < DEPTS.length; i++){
+    var D = DEPTS[i];
+    var d = (r-D.r)*(r-D.r) + (g-D.g)*(g-D.g) + (b-D.b)*(b-D.b);
+    if (d < bd){ bd = d; best = i; }
+  }
+  return best;
+}
+function buildDeptIndex(){
+  if (S.deptIdx || !S.mapReady) return;
+  try{
+    var w = 1024, h = Math.max(2, Math.round(S.ih * w / S.iw));
+    var oc = document.createElement("canvas"); oc.width = w; oc.height = h;
+    var octx = oc.getContext("2d");
+    octx.drawImage(img, 0, 0, w, h);
+    var d = octx.getImageData(0, 0, w, h).data;
+    var idx = new Int16Array(w*h), i;
+    for (i = 0; i < w*h; i++) idx[i] = deptClassify(d[i*4], d[i*4+1], d[i*4+2]);
+    // opening: strip speckles (text antialiasing near gray departments), then heal edges
+    var a = new Int16Array(idx), x, y, k;
+    var NB = [-w-1,-w,-w+1,-1,1,w-1,w,w+1];
+    for (y = 1; y < h-1; y++) for (x = 1; x < w-1; x++){
+      i = y*w + x;
+      var v = idx[i];
+      if (v < 0) continue;
+      var c = 0;
+      for (k = 0; k < 8; k++) if (idx[i+NB[k]] === v) c++;
+      if (c < 4) a[i] = -1;
+    }
+    var b2 = new Int16Array(a);
+    for (y = 1; y < h-1; y++) for (x = 1; x < w-1; x++){
+      i = y*w + x;
+      if (a[i] >= 0) continue;
+      var tally = {}, bestv = -1, bestc = 0;
+      for (k = 0; k < 8; k++){
+        var nv = a[i+NB[k]];
+        if (nv < 0) continue;
+        tally[nv] = (tally[nv]||0) + 1;
+        if (tally[nv] > bestc){ bestc = tally[nv]; bestv = nv; }
+      }
+      if (bestc >= 5) b2[i] = bestv;
+    }
+    S.deptIdx = {idx: b2, w: w, h: h};
+  }catch(e){ S.deptIdx = null; }
+}
+function buildDeptMask(i){
+  var DI = S.deptIdx, w = DI.w, h = DI.h;
+  var mc = document.createElement("canvas"); mc.width = w; mc.height = h;
+  var mctx = mc.getContext("2d");
+  var im2 = mctx.createImageData(w, h);
+  var d = im2.data, x, y, n = 0;
+  var minx = w, miny = h, maxx = 0, maxy = 0;
+  for (y = 0; y < h; y++) for (x = 0; x < w; x++){
+    var ii = y*w + x;
+    if (DI.idx[ii] !== i) continue;
+    n++;
+    if (x < minx) minx = x; if (x > maxx) maxx = x;
+    if (y < miny) miny = y; if (y > maxy) maxy = y;
+    var border = (x === 0 || y === 0 || x === w-1 || y === h-1 ||
+      DI.idx[ii-1] !== i || DI.idx[ii+1] !== i || DI.idx[ii-w] !== i || DI.idx[ii+w] !== i);
+    var p = ii*4;
+    if (border){ d[p]=255; d[p+1]=255; d[p+2]=255; d[p+3]=235; }
+    else { d[p]=255; d[p+1]=45; d[p+2]=120; d[p+3]=105; }
+  }
+  if (!n) return null;
+  mctx.putImageData(im2, 0, 0);
+  var cw = S.iw / w;
+  return {canvas: mc, bbox: [minx*cw, miny*cw, (maxx+1)*cw, (maxy+1)*cw]};
+}
+function selectDept(i){
+  clearTarget();
+  buildDeptIndex();
+  if (!S.deptIdx){ toast("Map not ready yet"); return; }
+  var m = buildDeptMask(i);
+  if (!m){ toast("No " + DEPTS[i].n + " areas found on the map"); return; }
+  S.dept = {i: i, name: DEPTS[i].n, mask: m.canvas, bbox: m.bbox};
+  $("targetLabel").textContent = DEPTS[i].n;
+  $("targetDist").textContent = "";
+  $("targetChip").classList.remove("hidden");
+  zoomToBbox(m.bbox);
+  if (!REDUCED_MOTION && !S.blinkTimer){
+    S.blinkTimer = setInterval(function(){ S.blinkOn = !S.blinkOn; scheduleRender(); }, 650);
+  }
+  render();
+}
+function clearDept(){
+  if (S.blinkTimer){ clearInterval(S.blinkTimer); S.blinkTimer = null; }
+  if (!S.dept) return;
+  S.dept = null;
+  if (!S.target) $("targetChip").classList.add("hidden");
+  render();
+}
+function zoomToBbox(bb){
+  var vw = vp.clientWidth, vh = vp.clientHeight;
+  var bw = Math.max(40, bb[2]-bb[0]), bh = Math.max(40, bb[3]-bb[1]);
+  var sc = Math.min(vw/bw, vh/bh) * 0.8;
+  S.view.scale = Math.min(S.maxScale, Math.max(S.minScale, sc));
+  setFollow(false);
+  centerOn((bb[0]+bb[2])/2, (bb[1]+bb[3])/2);
+}
+var tapCv = null;
+function deptTapSelect(wx, wy){
+  if (!S.mapReady) return;
+  try{
+    if (!tapCv){ tapCv = document.createElement("canvas"); tapCv.width = 5; tapCv.height = 5; }
+    var tctx = tapCv.getContext("2d");
+    tctx.clearRect(0,0,5,5);
+    tctx.drawImage(img, Math.max(0, wx-2), Math.max(0, wy-2), 5, 5, 0, 0, 5, 5);
+    var d = tctx.getImageData(0,0,5,5).data;
+    var r=0,g=0,b=0,n=0,i;
+    for (i=0;i<25;i++){
+      var mx = Math.max(d[i*4], d[i*4+1], d[i*4+2]);
+      if (mx < 70) continue;             // skip text/line pixels
+      r+=d[i*4]; g+=d[i*4+1]; b+=d[i*4+2]; n++;
+    }
+    if (!n){ return; }
+    var idx = deptClassify(Math.round(r/n), Math.round(g/n), Math.round(b/n));
+    if (idx >= 0) selectDept(idx);
+    else if (S.dept) clearDept();
+  }catch(e){}
 }
 function maybePlanRoute(){
   if (!S.target) return;

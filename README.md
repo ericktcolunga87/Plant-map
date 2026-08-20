@@ -76,6 +76,14 @@ Calibration is per-phone and survives closing the app.
   different resolution, asset spots scale over automatically; if the layout itself changed,
   re-tag what moved.
 
+## Departments
+
+Tap a legend swatch or any colored block on the map (or open **Find** — department chips are
+listed there, and typing letters matches names). All of that department's areas blink with a
+pink highlight and the view zooms to fit them; ✕ on the chip clears it. Selecting an asset
+and selecting a department are exclusive — one thing blinks at a time. The large mint-green
+area isn't in the legend, so it isn't selectable.
+
 ## The steadier dot
 
 Raw GPS jumps around; the app now runs an adaptive filter: standing still, it averages harder and
