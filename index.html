@@ -1810,7 +1810,6 @@ function selectDept(i){
   $("targetLabel").textContent = DEPTS[i].n;
   $("targetDist").textContent = "";
   $("targetChip").classList.remove("hidden");
-  zoomToBbox(m.bbox);
   if (!REDUCED_MOTION && !S.blinkTimer){
     S.blinkTimer = setInterval(function(){ S.blinkOn = !S.blinkOn; scheduleRender(); }, 650);
   }
