@@ -222,6 +222,9 @@
 
 <div id="menuSheet" class="sheet">
   <h2>Menu</h2>
+  <div class="btncol" style="margin-top:12px;">
+    <button id="btnRtu" class="primary">Show RTU air unit map</button>
+  </div>
 
   <h3>Calibration</h3>
   <p class="sub">Ties GPS to pixels on the map. Do it at doorways or just outside &mdash; GPS is
@@ -347,6 +350,7 @@ var S = {
   assets:[], assetsLoaded:false, target:null, showAll:false,
   motion:{still:null, buf:[]},
   nav:null, route:null,
+  mapMode:"plant", rtuReady:false, rtuLoading:false,
   dept:null, deptIdx:null, blinkOn:true, blinkTimer:null,
   gpsMsg:null
 };
@@ -492,6 +496,41 @@ function useBlob(blob){
   };
   img.src = URL.createObjectURL(blob);
 }
+var imgRtu = new Image();
+function setMapMode(mode){
+  S.mapMode = mode;
+  $("btnRtu").textContent = mode === "rtu" ? "Show plant map" : "Show RTU air unit map";
+  if (mode === "rtu") clearDept();
+  rebuildAssetLayer();
+  render();
+}
+function toggleRtu(){
+  closeSheet();
+  if (S.mapMode === "rtu"){ setMapMode("plant"); return; }
+  if (S.rtuReady){ setMapMode("rtu"); return; }
+  if (S.rtuLoading) return;
+  S.rtuLoading = true;
+  toast("Loading RTU map\u2026");
+  fetchEnc("rtu.enc").then(function(buf){
+    var pr = plParseEnc(buf);
+    var keyP = S.cred ? plDecrypt(S.cred.key, pr).catch(function(e){
+        if (S.pw) return plDeriveKey(S.pw, pr.salt).then(function(k){ return plDecrypt(k, pr); });
+        throw e;
+      }) : (S.pw ? plDeriveKey(S.pw, pr.salt).then(function(k){ return plDecrypt(k, pr); })
+                 : Promise.reject(new Error("locked")));
+    return keyP;
+  }).then(function(plain){
+    imgRtu.onload = function(){
+      S.rtuReady = true; S.rtuLoading = false;
+      setMapMode("rtu");
+    };
+    imgRtu.src = URL.createObjectURL(new Blob([plain], {type:"image/png"}));
+  }).catch(function(e){
+    S.rtuLoading = false;
+    toast(String(e.message).indexOf("notfound") >= 0 ?
+      "rtu.enc isn't on the website yet \u2014 upload it" : "Couldn't open the RTU map");
+  });
+}
 function loadLocalMapOrPrompt(){
   idbGet("mapblob").then(function(b){
     if (b) useBlob(b);
@@ -580,7 +619,7 @@ function escXml(s){
 }
 function rebuildAssetLayer(){
   var g = $("assetsG"); g.innerHTML = "";
-  if (!S.showAll) { g.classList.add("hidden"); return; }
+  if (!S.showAll || S.mapMode === "rtu") { g.classList.add("hidden"); return; }
   g.classList.remove("hidden");
   S.assets.forEach(function(a){
     var el = document.createElementNS("http://www.w3.org/2000/svg","g");
@@ -819,7 +858,8 @@ function render(){
   ctx.fillRect(0, 0, vp.clientWidth, vp.clientHeight);
   if (S.mapReady){
     ctx.setTransform(S.view.scale*dpr, 0, 0, S.view.scale*dpr, S.view.x*dpr, S.view.y*dpr);
-    ctx.drawImage(img, 0, 0);
+    var curImg = (S.mapMode === "rtu" && S.rtuReady) ? imgRtu : img;
+    ctx.drawImage(curImg, 0, 0, S.iw, S.ih);
     if (S.dept){
       if (REDUCED_MOTION){
         ctx.globalAlpha = 0.45;
@@ -1183,6 +1223,7 @@ function openSheet(){ $("menuSheet").classList.add("open"); refreshMgmt(); }
 function closeSheet(){ $("menuSheet").classList.remove("open"); }
 $("btnMenu").addEventListener("click", openSheet);
 $("btnCloseSheet").addEventListener("click", closeSheet);
+$("btnRtu").addEventListener("click", toggleRtu);
 $("btnAdd").addEventListener("click", function(){
   closeSheet();
   if (!S.mapReady){ toast("Load a map first"); return; }
@@ -1639,7 +1680,7 @@ function zoomToBbox(bb){
 }
 var tapCv = null;
 function deptTapSelect(wx, wy){
-  if (!S.mapReady) return;
+  if (!S.mapReady || S.mapMode !== "plant") return;
   try{
     if (!tapCv){ tapCv = document.createElement("canvas"); tapCv.width = 5; tapCv.height = 5; }
     var tctx = tapCv.getContext("2d");

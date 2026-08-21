@@ -78,6 +78,16 @@ Calibration is per-phone and survives closing the app.
   different resolution, asset spots scale over automatically; if the layout itself changed,
   re-tag what moved.
 
+## RTU air unit map
+
+Menu → **Show RTU air unit map** swaps the view: department colors blank out to the bare
+building outline, and every rooftop/air unit (with its name and number) appears at its true
+location — registered onto the exact same pixel frame, so your calibration, live dot,
+corridor routing, and asset Find all keep working on it. Asset number labels and department
+selection hide in this view; the same button switches back. `rtu.enc` is encrypted with the
+same password; keep `rtu-map-KEEP-OFF-GITHUB.png` offline with your other master, and after a
+password change re-encrypt it with encrypt.html and rename the download to `rtu.enc`.
+
 ## Departments
 
 Tap a legend swatch or any colored block on the map (or open **Find** — department chips are
