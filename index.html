@@ -226,6 +226,7 @@
     <button id="btnRtu" class="primary">Show RTU air unit map</button>
   </div>
 
+  <div id="calSection">
   <h3>Calibration</h3>
   <p class="sub">Ties GPS to pixels on the map. Do it at doorways or just outside &mdash; GPS is
     strongest there and the math carries indoors. Minimum 2 points; 3&ndash;4 spread far apart is best.</p>
@@ -233,7 +234,10 @@
   <div id="fitLine">No points yet.</div>
   <div class="btncol">
     <button id="btnAdd" class="primary">+ Add calibration point</button>
+    <button id="btnCalExport">Export calibration file (encrypted)</button>
+    <button id="btnCalSite">Reload calibration from the website file</button>
     <button id="btnClear" class="danger">Delete all points</button>
+  </div>
   </div>
 
   <h3>Assets (<span id="assetCount">0</span>)</h3>
@@ -267,6 +271,24 @@
   </div>
   <input type="file" id="fileMap" accept="image/*" class="hidden">
   <input type="file" id="fileAssets" class="hidden">
+</div>
+
+<div id="coordModal" class="modal hidden">
+  <div class="card">
+    <h3>Type the coordinates for this pin</h3>
+    <p class="note">Decimal degrees (from Google Maps / Google Earth: right-click the spot and
+      copy). Example: 41.60712, -87.06248</p>
+    <label style="display:block;font-size:13px;color:var(--muted);margin:12px 0 5px;">Latitude</label>
+    <input id="coordLat" inputmode="decimal" autocomplete="off"
+      style="width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--text);font-size:16px;padding:11px 12px;font-family:var(--mono);">
+    <label style="display:block;font-size:13px;color:var(--muted);margin:12px 0 5px;">Longitude</label>
+    <input id="coordLon" inputmode="decimal" autocomplete="off"
+      style="width:100%;background:var(--panel);border:1px solid var(--line);border-radius:10px;color:var(--text);font-size:16px;padding:11px 12px;font-family:var(--mono);">
+    <div class="row">
+      <button id="btnCoordCancel">Cancel</button>
+      <button id="btnCoordSave" class="primary">Save point</button>
+    </div>
+  </div>
 </div>
 
 <div id="capModal" class="modal hidden">
@@ -333,6 +355,7 @@
 
 <script>
 "use strict";
+var SHOW_CAL_UI = false;   // set true to restore the calibration menu, intro, and door pins
 /* ================= state ================= */
 var S = {
   view:{x:0,y:0,scale:0.15}, iw:0, ih:0, mapReady:false,
@@ -491,10 +514,10 @@ function useBlob(blob){
     fitView(); rebuildAssetLayer(); render();
     loadAssets();
     loadRtus();
+    loadSiteCal();
     S.deptIdx = null; clearDept();
     setTimeout(buildNavGrid, 60);
     setTimeout(buildDeptIndex, 400);
-    maybeIntro();
   };
   img.src = URL.createObjectURL(blob);
 }
@@ -1054,8 +1077,9 @@ function handleTap(sx, sy){
   if (S.mode === "cal-placing" || S.mode === "cal-placed"){
     updatePend(w.x, w.y);
     S.mode = "cal-placed";
-    showHint("Pin dropped. Drag it to fine-tune (or tap to jump it), then capture GPS while standing on that exact spot.",
+    showHint("Pin dropped. Drag it to fine-tune (or tap to jump it), then capture GPS standing on that spot \u2014 or type known coordinates for it.",
       [{label:"Capture GPS here", primary:true, fn:startCapture},
+       {label:"Type coordinates", fn:openCoordModal},
        {label:"Cancel", fn:cancelPlacing}]);
     render();
   } else if (S.mode === "asset-place"){
@@ -1234,6 +1258,7 @@ function loadSettings(){
 function rebuildPins(){
   var g = $("pinsG"); g.innerHTML = "";
   csNodes = csNodes.filter(function(n){ return !n.el.__pin; });
+  if (!SHOW_CAL_UI){ render(); return; }
   S.calib.forEach(function(pt, i){
     var pin = document.createElementNS("http://www.w3.org/2000/svg","g");
     pin.__pin = true;
@@ -1283,10 +1308,82 @@ $("btnAdd").addEventListener("click", function(){
   showHint("Walk to a spot you can point to exactly on the map (a door, a machine corner, an aisle intersection). Stand on it, then tap that exact spot on the map. Zoom in first for precision.",
     [{label:"Cancel", fn:cancelPlacing}]);
 });
+$("btnCalExport").addEventListener("click", exportCal);
+$("btnCalSite").addEventListener("click", function(){
+  if (S.calib.length && !confirm("Replace this phone's calibration with the website file?")) return;
+  fetchEnc("cal.enc", true).then(decryptAssetsBuf).then(function(p){
+    adoptCalPayload(p, "from site");
+  }).catch(function(e){
+    toast(String(e.message).indexOf("locked")>=0 ? "Unlock with the password first" : "No cal.enc on the website yet");
+  });
+});
 $("btnClear").addEventListener("click", function(){
   if (!confirm("Delete all calibration points?")) return;
   S.calib = []; saveCalib(); fitTransform(); rebuildPins();
 });
+
+/* ================= typed-coordinate calibration ================= */
+function openCoordModal(){
+  hideHint();
+  $("coordLat").value = ""; $("coordLon").value = "";
+  $("coordModal").classList.remove("hidden");
+  setTimeout(function(){ $("coordLat").focus(); }, 60);
+}
+$("btnCoordCancel").addEventListener("click", function(){
+  $("coordModal").classList.add("hidden");
+  showHint("Pin still placed \u2014 capture GPS, type coordinates, or cancel.",
+    [{label:"Capture GPS here", primary:true, fn:startCapture},
+     {label:"Type coordinates", fn:openCoordModal},
+     {label:"Cancel", fn:cancelPlacing}]);
+});
+$("btnCoordSave").addEventListener("click", function(){
+  var lat = parseFloat($("coordLat").value.replace(",", "."));
+  var lon = parseFloat($("coordLon").value.replace(",", "."));
+  if (!isFinite(lat) || !isFinite(lon)){ toast("Enter both numbers"); return; }
+  if (lon > 66 && lon < 125 && lat > 24 && lat < 50){
+    lon = -lon;   // US longitudes are negative; missing minus is the common typo
+    toast("Longitude made negative (western hemisphere)");
+  }
+  if (lat < -85 || lat > 85 || lon < -180 || lon > 180){ toast("Those aren't valid coordinates"); return; }
+  S.calib.push({lat:lat, lon:lon, acc:1, px:S.pend.px, py:S.pend.py});
+  saveCalib();
+  $("coordModal").classList.add("hidden");
+  cancelPlacing();
+  fitTransform(); rebuildPins();
+});
+function exportCal(){
+  if (!S.cred){ toast("Unlock with the password first"); return; }
+  if (S.calib.length < 2){ toast("Need at least 2 points to export"); return; }
+  var payload = {v:1, mapW:S.iw||4096, mapH:S.ih||4040, pts:S.calib};
+  plEncryptFile(S.cred.key, S.cred.salt, new TextEncoder().encode(JSON.stringify(payload)))
+    .then(function(bytes){
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([bytes], {type:"application/octet-stream"}));
+      a.download = "cal.enc";
+      document.body.appendChild(a); a.click(); a.remove();
+      toast("Exported \u2014 upload cal.enc to the repo and new phones skip calibration");
+    });
+}
+function adoptCalPayload(p, label){
+  var sx2 = (S.mapReady && p.mapW) ? S.iw/p.mapW : 1;
+  var sy2 = (S.mapReady && p.mapH) ? S.ih/p.mapH : 1;
+  S.calib = (p.pts||[]).map(function(pt){
+    return {lat:pt.lat, lon:pt.lon, acc:pt.acc||10, px:pt.px*sx2, py:pt.py*sy2};
+  });
+  saveCalib(); fitTransform(); rebuildPins();
+  if (label) toast(S.calib.length + " calibration points loaded " + label);
+}
+function loadSiteCal(){
+  // with the calibration UI hidden, the website file always wins so every phone
+  // stays on the shared calibration; otherwise only adopt when the phone has none
+  var done = function(){ maybeIntro(); };
+  if (SHOW_CAL_UI && S.calib.length){ done(); return; }
+  fetchEnc("cal.enc").then(decryptAssetsBuf).then(function(p){
+    adoptCalPayload(p, "from site");
+    done();
+  }).catch(function(){ done(); });
+}
+$("btnCalSite") && null;
 
 /* ================= GPS capture for calibration ================= */
 function startCapture(){
@@ -1904,6 +2001,7 @@ function toast(t){
 }
 var introShown = false;
 function maybeIntro(){
+  if (!SHOW_CAL_UI) return;
   if (introShown || S.calib.length > 0) return;
   introShown = true;
   $("introModal").classList.remove("hidden");
@@ -1940,6 +2038,7 @@ $("btnLock").addEventListener("click", function(){
 /* ================= boot ================= */
 loadCalib();
 loadSettings();
+if (!SHOW_CAL_UI) $("calSection").classList.add("hidden");
 fitTransform();
 rebuildPins();
 window.addEventListener("resize", function(){ sizeCanvas(); render(); });

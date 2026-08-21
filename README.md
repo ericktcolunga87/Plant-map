@@ -43,7 +43,24 @@ numbers erased). Keep it on your computer; you'll need it if you ever change the
 - Honest limit: the code is public, only the data is encrypted. The password is the whole wall —
   someone who can guess it gets the map.
 
-## Calibration (first-run guide walks you through this)
+## Calibration (hidden — ships pre-calibrated)
+
+The app ships calibrated via `cal.enc` (built from Google-imagery door coordinates, self-check
+±3 ft). All calibration controls, the first-run message, and the door pins are hidden, and
+every phone silently adopts the website's calibration file on launch — replace `cal.enc` in
+the repo and all phones follow. To bring the calibration tools back, edit `index.html` and set
+`SHOW_CAL_UI = true` near the top of the script.
+
+## Calibration details (when the tools are shown)
+
+**Shared calibration:** once one phone is calibrated well, Menu → **Export calibration file**
+produces `cal.enc`; upload it to the repo and every phone that has no calibration of its own
+adopts it automatically on first open — no on-site calibration ever again. **Reload
+calibration from the website file** pulls it on demand. When placing a calibration pin you can
+also **Type coordinates** instead of capturing GPS — paste lat/lon read from Google
+Maps/Earth aerial imagery (right-click a building corner → copy the numbers), which lets the
+whole calibration be done from a desk.
+
 
 Go to **two doorways (or step just outside) at opposite ends of the building** — GPS is strongest
 there and outdoor points position you correctly indoors. At each: Menu → Add calibration point →
