@@ -118,6 +118,11 @@ area isn't in the legend, so it isn't selectable.
 
 ## The steadier dot
 
+**View controls the filter:** on the plant map the adaptive filter runs (steady dot indoors,
+"avg" in the status); on the RTU map fixes are raw with zero lag — up on the roof the sky
+view is clear and smoothing just gets in the way. Switching views resets the filter.
+
+
 Raw GPS jumps around; the app now runs an adaptive filter: standing still, it averages harder and
 harder and the dot settles (status shows "avg"); when your position genuinely starts drifting, it
 drops the average and follows with a couple seconds of lag. Garbage fixes (terrible accuracy,

@@ -356,6 +356,7 @@
 <script>
 "use strict";
 var SHOW_CAL_UI = false;   // set true to restore the calibration menu, intro, and door pins
+var USE_ROUTING = false;   // set true to restore corridor-following routes (straight line otherwise)
 /* ================= state ================= */
 var S = {
   view:{x:0,y:0,scale:0.15}, iw:0, ih:0, mapReady:false,
@@ -524,6 +525,7 @@ function useBlob(blob){
 var imgRtu = new Image();
 function setMapMode(mode){
   S.mapMode = mode;
+  FLT = plNewFilter();
   $("btnRtu").textContent = mode === "rtu" ? "Show plant map" : "Show RTU air unit map";
   if (mode === "rtu") clearDept();
   rebuildAssetLayer();
@@ -1635,6 +1637,7 @@ function plRoute(cost, w, h, sx, sy, gx, gy){
 }
 /*NAV-END*/
 function buildNavGrid(){
+  if (!USE_ROUTING) return;
   try{
     var gw = 512, gh = Math.max(2, Math.round(S.ih * gw / S.iw));
     var oc = document.createElement("canvas");
@@ -1653,6 +1656,7 @@ function syncRouteEls(){
   } else pl.classList.add("hidden");
 }
 function planRoute(){
+  if (!USE_ROUTING){ S.route = null; syncRouteEls(); return; }
   if (!S.nav || !S.target || !S.pos || !S.T){ S.route = null; syncRouteEls(); return; }
   var p = geoToPixel(S.pos.lat, S.pos.lon);
   var c = S.nav.cell;
@@ -1849,6 +1853,7 @@ function deptTapSelect(wx, wy){
   }catch(e){}
 }
 function maybePlanRoute(){
+  if (!USE_ROUTING) return;
   if (!S.target) return;
   if (!S.route){ planRoute(); return; }
   if (Date.now() - S.route.t < 2000) return;
@@ -1878,9 +1883,15 @@ function startTrack(){
   reqWake();
   S.watchId = navigator.geolocation.watchPosition(function(f){
     S.gpsMsg = null;
-    var out = plFilterStep(FLT, S.motion.still, f.coords.latitude, f.coords.longitude,
-                           f.coords.accuracy, f.timestamp || Date.now());
-    if (!out) return; // junk fix rejected
+    var out;
+    if (S.mapMode === "rtu"){
+      // roof mode: strong sky view, no smoothing, no lag
+      out = {lat:f.coords.latitude, lon:f.coords.longitude, accD:f.coords.accuracy};
+    } else {
+      out = plFilterStep(FLT, S.motion.still, f.coords.latitude, f.coords.longitude,
+                         f.coords.accuracy, f.timestamp || Date.now());
+      if (!out) return; // junk fix rejected
+    }
     S.pos = {lat:out.lat, lon:out.lon, acc:out.accD};
     S.posT = Date.now();
     if (S.follow && S.T){ var p = geoToPixel(S.pos.lat, S.pos.lon); centerOn(p.x, p.y); }
@@ -1910,7 +1921,7 @@ function updateTopbar(){
     var age = Math.round((Date.now()-S.posT)/1000);
     var el = $("gpsStat");
     el.textContent = "\u00b1" + Math.round(S.pos.acc*FT) + " ft \u00b7 " + age + "s" +
-      (FLT.mode === "still" ? " \u00b7 avg" : "");
+      (S.mapMode === "plant" && FLT.mode === "still" ? " \u00b7 avg" : "");
     el.className = S.pos.acc < 10 ? "good" : (S.pos.acc < 25 ? "warn" : "bad");
   }
   var n = S.calib.length, f = $("fitStat");
