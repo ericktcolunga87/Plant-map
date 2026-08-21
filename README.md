@@ -84,7 +84,10 @@ Menu → **Show RTU air unit map** swaps the view to the RTU drawing itself — 
 building outline with every air unit's name and number, and nothing from the plant map —
 registered onto the exact same pixel frame, so your calibration, live dot, corridor routing,
 and asset Find all keep working on it. Asset number labels and department
-selection hide in this view; the same button switches back. `rtu.enc` is encrypted with the
+selection hide in this view; the same button switches back. In **Find**, type "RTU" plus a
+number (or part of a unit's area name, like "milling") to target an air unit — it blinks,
+routes, and shows walking distance just like an asset, and selecting one switches to the RTU
+view automatically. The 63 units live in `rtus.enc` (same password). `rtu.enc` is encrypted with the
 same password; keep `rtu-map-KEEP-OFF-GITHUB.png` offline with your other master, and after a
 password change re-encrypt it with encrypt.html and rename the download to `rtu.enc`.
 

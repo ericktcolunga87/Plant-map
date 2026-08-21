@@ -1,5 +1,5 @@
-var CACHE = "plantloc-v5";
-var ASSETS = ["./", "index.html", "map.enc", "assets.enc", "rtu.enc", "manifest.json",
+var CACHE = "plantloc-v6";
+var ASSETS = ["./", "index.html", "map.enc", "assets.enc", "rtu.enc", "rtus.enc", "manifest.json",
               "icon-192.png", "icon-512.png", "encrypt.html"];
 
 self.addEventListener("install", function (e) {
